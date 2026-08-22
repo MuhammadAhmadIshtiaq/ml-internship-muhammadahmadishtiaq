@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Refresh &amp; Content Opportunity Scoring — A Search Performance Study</title>
+<style>
+  :root {
+    --ink: #1a1d1f;
+    --ink-soft: #4a4f54;
+    --paper: #fbfaf8;
+    --line: #e2ddd4;
+    --accent: #2b6e5e;
+    --accent-soft: #e7f0ec;
+    --warn: #9a5b2e;
+    --mono: 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace;
+    --serif: 'Source Serif 4', Georgia, 'Times New Roman', serif;
+    --sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    line-height: 1.65;
+    font-size: 17px;
+  }
+
+  .wrap {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 0 24px;
+  }
+
+  header.masthead {
+    border-bottom: 1px solid var(--line);
+    padding: 64px 0 40px;
+    background: linear-gradient(180deg, #ffffff, var(--paper));
+  }
+
+  .kicker {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 18px;
+  }
+
+  h1.title {
+    font-family: var(--serif);
+    font-size: 2.5rem;
+    line-height: 1.15;
+    margin: 0 0 20px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  .meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 22px;
+    font-size: 14px;
+    color: var(--ink-soft);
+    font-family: var(--mono);
+  }
+
+  .meta-row span strong {
+    color: var(--ink);
+    font-weight: 600;
+  }
+
+  nav.toc {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 20px 24px;
+    margin: 32px 0 0;
+    font-size: 14.5px;
+  }
+
+  nav.toc .toc-label {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    margin-bottom: 10px;
+  }
+
+  nav.toc ol {
+    columns: 2;
+    column-gap: 28px;
+    margin: 0;
+    padding-left: 18px;
+  }
+
+  nav.toc li { margin-bottom: 6px; break-inside: avoid; }
+  nav.toc a { color: var(--ink); text-decoration: none; border-bottom: 1px solid transparent; }
+  nav.toc a:hover { border-bottom-color: var(--accent); color: var(--accent); }
+
+  main { padding: 8px 0 100px; }
+
+  section { padding: 46px 0; border-bottom: 1px solid var(--line); }
+  section:last-of-type { border-bottom: none; }
+
+  .section-num {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--accent);
+    letter-spacing: 0.06em;
+    margin-bottom: 6px;
+  }
+
+  h2 {
+    font-family: var(--serif);
+    font-size: 1.65rem;
+    margin: 0 0 20px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  h3 {
+    font-family: var(--sans);
+    font-size: 1rem;
+    font-weight: 700;
+    margin: 26px 0 10px;
+    color: var(--ink);
+  }
+
+  p { margin: 0 0 16px; color: var(--ink); }
+  p.lede {
+    font-family: var(--serif);
+    font-size: 1.15rem;
+    line-height: 1.7;
+    color: var(--ink);
+  }
+
+  ul, ol { margin: 0 0 16px; padding-left: 22px; }
+  li { margin-bottom: 8px; }
+
+  strong { font-weight: 700; }
+
+  code, .mono {
+    font-family: var(--mono);
+    font-size: 0.88em;
+    background: #f0ede6;
+    padding: 1px 6px;
+    border-radius: 4px;
+  }
+
+  a { color: var(--accent); }
+
+  .callout {
+    background: var(--accent-soft);
+    border-left: 3px solid var(--accent);
+    padding: 16px 20px;
+    border-radius: 0 8px 8px 0;
+    margin: 20px 0;
+    font-size: 15px;
+  }
+
+  .callout.warn {
+    background: #f7ece0;
+    border-left-color: var(--warn);
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 20px 0;
+    font-size: 15px;
+  }
+
+  th, td {
+    text-align: left;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  th {
+    font-family: var(--mono);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--ink-soft);
+    border-bottom: 2px solid var(--ink);
+  }
+
+  tr:last-child td { border-bottom: none; }
+
+  td.num, th.num { text-align: right; font-family: var(--mono); }
+
+  .figure {
+    margin: 28px 0;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px;
+  }
+
+  .figure img {
+    width: 100%;
+    height: auto;
+    border-radius: 6px;
+    display: block;
+  }
+
+  .figure figcaption {
+    font-size: 13.5px;
+    color: var(--ink-soft);
+    margin-top: 12px;
+    font-family: var(--mono);
+    line-height: 1.5;
+  }
+
+  .stat-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+    margin: 22px 0;
+  }
+
+  .stat-card {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 18px;
+    text-align: center;
+  }
+
+  .stat-card .num {
+    font-family: var(--serif);
+    font-size: 1.7rem;
+    font-weight: 600;
+    color: var(--accent);
+  }
+
+  .stat-card .label {
+    font-size: 12.5px;
+    color: var(--ink-soft);
+    margin-top: 4px;
+  }
+
+  .reason-sample {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 14px 16px;
+    font-family: var(--mono);
+    font-size: 13px;
+    margin: 8px 0;
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    align-items: baseline;
+  }
+
+  .badge {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    padding: 2px 9px;
+    border-radius: 20px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  footer {
+    padding: 48px 0 80px;
+    border-top: 1px solid var(--line);
+    text-align: center;
+  }
+
+  footer .credit {
+    font-family: var(--mono);
+    font-size: 14px;
+    color: var(--ink-soft);
+  }
+
+  footer .credit a {
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  .checklist {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--ink-soft);
+    margin-top: 10px;
+  }
+
+  @media (max-width: 640px) {
+    h1.title { font-size: 1.9rem; }
+    .stat-row { grid-template-columns: 1fr; }
+    nav.toc ol { columns: 1; }
+    .reason-sample { flex-direction: column; gap: 4px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="masthead">
+  <div class="wrap">
+    <div class="kicker">FlyRank ML Internship — Capstone Research Paper</div>
+    <h1 class="title">Which Pages Are Worth a Second Look? A Ranked Approach to Content Refresh Prioritization</h1>
+    <div class="meta-row">
+      <span><strong>Author</strong> Muhammad Ahmad Ishtiaq</span>
+      <span><strong>Lane</strong> Refresh / Content Opportunity Scoring</span>
+      <span><strong>Date</strong> August 2026</span>
+    </div>
+    <nav class="toc">
+      <div class="toc-label">Contents</div>
+      <ol>
+        <li><a href="#abstract">Abstract</a></li>
+        <li><a href="#intro">Introduction</a></li>
+        <li><a href="#data">Data</a></li>
+        <li><a href="#method">Methodology</a></li>
+        <li><a href="#results">Results</a></li>
+        <li><a href="#limitations">Limitations</a></li>
+        <li><a href="#recommendations">Recommendations</a></li>
+        <li><a href="#repro">Reproducibility</a></li>
+        <li><a href="#credit">Acknowledgments</a></li>
+      </ol>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <section id="abstract">
+    <div class="section-num">Abstract</div>
+    <h2>Five sentences, up front</h2>
+    <p class="lede">
+      This project asks which content pages are most likely to be declining, growing, or stable
+      in search performance, and whether a ranked scoring model can prioritize them for review
+      more effectively than a simple threshold rule. Using the FlyRank internship warehouse
+      (<code>fact_content_daily_performance</code>, ~78.8M rows), January 2026 and March 2026
+      click, impression, and position data were aggregated per client–content pair to define a
+      three-class label based on percentage change in clicks. A Random Forest classifier trained
+      on January-only signals — clicks, impressions, average position, and CTR — was compared
+      against a naive majority-class baseline and a position-based heuristic, using a
+      client-grouped train/test split to prevent leakage. The Random Forest achieved a macro F1
+      of 0.305, beating both the naive baseline (0.266) and the heuristic (0.108), with the
+      advantage confirmed stable across five different train/test splits (range: 0.284–0.354).
+      The output is a ranked, reason-coded review queue intended to help a content strategist
+      prioritize a limited number of pages for refresh — not to replace human judgment.
+    </p>
+  </section>
+
+  <section id="intro">
+    <div class="section-num">01 — Introduction</div>
+    <h2>The decision this supports</h2>
+    <p>
+      Content strategists have limited time to review and refresh pages. This project's output
+      ranks pages so review effort goes to the ones most worth acting on first — instead of
+      reviewing in an arbitrary order or reacting only to the most obvious drops.
+    </p>
+    <h3>Unit of analysis</h3>
+    <p>
+      A <strong>(client, content)</strong> pair — one row per unique content item per client,
+      aggregated over a calendar month window.
+    </p>
+    <h3>Who acts, and how</h3>
+    <p>
+      A content strategist or SEO editor takes the ranked list and decides, per page: refresh
+      the content, leave it alone, or continue monitoring it.
+    </p>
+    <h3>Cost of a wrong call</h3>
+    <p>
+      Missing a real decline means a page keeps losing visibility unnoticed until the next
+      review cycle. Flagging a stable or growing page as declining wastes editor review time.
+      Missed declines are treated as the costlier error, so scoring favors not missing real
+      decliners over avoiding false alarms.
+    </p>
+    <h3>Why not just a plain rule</h3>
+    <p>
+      A simple threshold — "flag if clicks dropped more than 20%" — is a reasonable starting
+      point, and is used here as the baseline. But it can't weigh multiple signals together, and
+      behavior varies by content type and volume. A model earns its place only if it measurably
+      beats this baseline on the same data and metric; that comparison is reported honestly in
+      the Results section below, including where the improvement is modest.
+    </p>
+  </section>
+
+  <section id="data">
+    <div class="section-num">02 — Data</div>
+    <h2>Source, windows, and exclusions</h2>
+    <p>
+      FlyRank internship warehouse (Hugging Face, gated, build v20260703) —
+      <code>fact_content_daily_performance</code> (grain: report_date × client × content, ~78.8M
+      rows, partitioned by month) and <code>dim_clients</code> (104 rows, access and history
+      metadata).
+    </p>
+    <h3>Date windows</h3>
+    <p>
+      Development used a mid-panel window — January 2026 as the "before" period, March 2026 as
+      the "after" period — rather than the final panel month (June 2026, matching the
+      <code>_sample</code> table), which was treated as sealed and untouched throughout.
+    </p>
+    <h3>What was excluded, and why</h3>
+    <ul>
+      <li>
+        <strong>Label-derived fields</strong> (<code>trend_direction</code>,
+        <code>trend_pct</code>) were never used as features — they are computed from the same
+        outcome being predicted.
+      </li>
+      <li>
+        <strong>Pre-GA4-start rows</strong> were excluded from GA4-dependent calculations, since
+        GA4 columns are zero-filled — not genuinely zero — before a client's data start date.
+      </li>
+      <li>
+        <strong>Low-volume pages</strong> (fewer than 10 January clicks) were dropped entirely —
+        this cut the eligible set from 41,101 to 8,557 pairs, avoiding noise where small
+        denominators produce misleading percentage swings.
+      </li>
+    </ul>
+    <div class="callout">
+      No client names, domains, URLs, private queries, credentials, or raw exports appear
+      anywhere in this project. All identifiers are pseudonymous hash IDs as provided by the
+      warehouse release, used only for grouping — never as model features.
+    </div>
+  </section>
+
+  <section id="method">
+    <div class="section-num">03 — Methodology</div>
+    <h2>Label, features, baseline, validation</h2>
+
+    <h3>Label definition</h3>
+    <p>
+      For each eligible pair, <code>pct_change_clicks = (march_clicks − jan_clicks) / jan_clicks</code>.
+      Pages are bucketed as <strong>Declining</strong> (≤ −20%), <strong>Growing</strong> (≥
+      +20%), or <strong>Stable</strong> (in between).
+    </p>
+
+    <h3>Baselines — both January-only, no future data</h3>
+    <ul>
+      <li><strong>Naive:</strong> always predict the majority class (Declining, 38.1%).</li>
+      <li><strong>Heuristic:</strong> a rule on <code>jan_avg_position</code> alone — worse than
+        20 → Declining; better than 8 → Growing; otherwise → Stable.</li>
+    </ul>
+
+    <h3>Model features (January-window only)</h3>
+    <p>
+      <code>jan_clicks</code>, <code>jan_impressions</code>, <code>jan_avg_position</code>,
+      <code>jan_ctr</code>. March-window values, label-derived fields, and pseudonymous IDs were
+      deliberately excluded.
+    </p>
+
+    <h3>Validation design</h3>
+    <p>
+      Train/test split grouped by <code>client_hash_id</code> (80/20,
+      <code>GroupShuffleSplit</code>) so no client's content appears in both sets — this prevents
+      client-specific leakage, since pages from the same client likely share systematic patterns.
+      No data from the sealed final month (June 2026) was used anywhere in training or
+      evaluation.
+    </p>
+  </section>
+
+  <section id="results">
+    <div class="section-num">04 — Results</div>
+    <h2>Model vs. baseline, same split</h2>
+
+    <p>
+      Accuracy is misleading here: the naive baseline's 66.3% accuracy comes entirely from a test
+      set that happened to skew 66% Declining, an artifact of which four clients (of only 19
+      eligible) landed in the test split. <strong>Macro F1</strong>, which weights all three
+      classes equally, is the fair metric and is used throughout.
+    </p>
+
+    <table>
+      <thead>
+        <tr><th>Method</th><th class="num">Accuracy</th><th class="num">Macro F1</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Naive baseline (majority class)</td><td class="num">0.663</td><td class="num">0.266</td></tr>
+        <tr><td>Heuristic baseline (position rule)</td><td class="num">0.120</td><td class="num">0.108</td></tr>
+        <tr><td><strong>Random Forest (Jan-only features)</strong></td><td class="num">0.329</td><td class="num"><strong>0.305</strong></td></tr>
+      </tbody>
+    </table>
+
+    <div class="figure">
+      <img src="work/outputs/chart_baseline_vs_model.png" alt="Bar chart comparing macro F1 across naive baseline, heuristic baseline, and Random Forest">
+      <figcaption>Figure 1 — Macro F1 by method. Random Forest clears both baselines on the class-balanced metric.</figcaption>
+    </div>
+
+    <h3>Stability across splits</h3>
+    <p>
+      Re-evaluated across five different train/test splits (seeds 0, 1, 42, 7, 99), macro F1
+      ranged <strong>0.284–0.354</strong> — consistently above both baselines in every split, not
+      an artifact of one favorable partition.
+    </p>
+
+    <div class="figure">
+      <img src="work/outputs/chart_sensitivity.png" alt="Line chart showing macro F1 across five random split seeds compared to baseline lines">
+      <figcaption>Figure 2 — Macro F1 across five random split seeds, with baseline reference lines.</figcaption>
+    </div>
+
+    <h3>Where the model is right and wrong</h3>
+    <p>
+      The model correctly identifies 60% of Growing pages and 26% of Stable pages — categories
+      the naive baseline gets 0% on. Its main error mode is under-predicting Declining (29%
+      recall, 66% precision) — it is conservative about that call, which pairs well with the
+      confidence-gated Refresh/Monitor split described in Recommendations.
+    </p>
+
+    <div class="figure">
+      <img src="work/outputs/chart_confusion_matrix.png" alt="Confusion matrix for the Random Forest model across Declining, Growing, and Stable classes">
+      <figcaption>Figure 3 — Confusion matrix, Random Forest on the held-out test split.</figcaption>
+    </div>
+
+    <h3>Label distribution</h3>
+    <div class="figure">
+      <img src="work/outputs/chart_label_distribution.png" alt="Bar chart of label distribution across Declining, Growing, and Stable">
+      <figcaption>Figure 4 — Class distribution across the full labeled set (8,557 pairs), reasonably balanced.</figcaption>
+    </div>
+
+    <h3>What drives the predictions</h3>
+    <table>
+      <thead><tr><th>Feature</th><th class="num">Importance</th></tr></thead>
+      <tbody>
+        <tr><td>jan_clicks</td><td class="num">0.320</td></tr>
+        <tr><td>jan_ctr</td><td class="num">0.247</td></tr>
+        <tr><td>jan_impressions</td><td class="num">0.219</td></tr>
+        <tr><td>jan_avg_position</td><td class="num">0.214</td></tr>
+      </tbody>
+    </table>
+    <p>
+      No single feature dominates — the model relies on a combined pattern across volume, CTR,
+      impressions, and position rather than any one signal.
+    </p>
+
+    <div class="callout warn">
+      <strong>Negative result worth noting:</strong> the position-only heuristic performed
+      <em>worse than random guessing</em> across three classes (12% vs. ~33% chance). Position
+      alone is a poor predictor of future click direction in this data — it needs to be combined
+      with volume and CTR to be useful, which is exactly what the model does and the heuristic
+      doesn't.
+    </div>
+  </section>
+
+  <section id="limitations">
+    <div class="section-num">05 — Limitations</div>
+    <h2>What this work cannot claim</h2>
+    <ul>
+      <li><strong>Not causal.</strong> This shows association between January-window signals and
+        March-window outcomes, not that any signal causes growth or decline. No claims are made
+        about ranking algorithm behavior.</li>
+      <li><strong>Small client count (19).</strong> Limits generalizability beyond the sampled
+        clients, though the five-seed sensitivity check shows the model's edge over baseline
+        holds regardless of which clients land in test.</li>
+      <li><strong>Modest, not strong, predictive power.</strong> Macro F1 of 0.305 is a real but
+        modest edge — this is a directional, decision-support tool meant to narrow a review
+        queue, not a replacement for human judgment on any single page.</li>
+      <li><strong>Two-window design.</strong> A single before/after comparison simplifies leakage
+        control but means true "recovering" pages (declining, then improving) aren't distinctly
+        identified from ordinary Growing pages.</li>
+      <li><strong>Volume floor.</strong> Pages under 10 January clicks were excluded entirely —
+        this analysis says nothing about long-tail, low-traffic content.</li>
+    </ul>
+  </section>
+
+  <section id="recommendations">
+    <div class="section-num">06 — Ranked Recommendations</div>
+    <h2>The action playbook</h2>
+    <p>
+      Pages were ranked by decline-confidence and mapped to one of three actions:
+    </p>
+
+    <div class="stat-row">
+      <div class="stat-card">
+        <div class="num">16</div>
+        <div class="label">Refresh — high-confidence decline</div>
+      </div>
+      <div class="stat-card">
+        <div class="num">246</div>
+        <div class="label">Monitor — low-confidence or stable</div>
+      </div>
+      <div class="stat-card">
+        <div class="num">221</div>
+        <div class="label">Protect — predicted growing</div>
+      </div>
+    </div>
+
+    <p>
+      Each page also carries a plain-language reason code, comparing its January signals against
+      typical values for confirmed decliners in the training data:
+    </p>
+
+    <div class="reason-sample">
+      <span>position worse than typical decliner (5.8)</span>
+      <span class="badge">Refresh</span>
+    </div>
+    <div class="reason-sample">
+      <span>CTR below typical decliner (1.1%)</span>
+      <span class="badge">Refresh</span>
+    </div>
+    <div class="reason-sample">
+      <span>flagged on combined signal pattern, no single dominant factor</span>
+      <span class="badge">Refresh</span>
+    </div>
+
+    <h3>How an editor uses this tomorrow</h3>
+    <p>
+      Start at the top of the Refresh list — a short, manageable queue for one review cycle. Read
+      the reason code, check the page, and decide to update, rewrite, or leave as-is. Treat
+      Monitor as a "check again next month" list. Treat Protect as do-not-touch unless there is a
+      strong external reason.
+    </p>
+    <p>
+      Full ranked list: <code>work/outputs/priority_queue.csv</code>.
+    </p>
+  </section>
+
+  <section id="repro">
+    <div class="section-num">07 — Reproducibility</div>
+    <h2>Run it yourself</h2>
+    <ol>
+      <li>Clone the repo and open <code>work/notebooks/capstone.ipynb</code> in Colab.</li>
+      <li>Run all cells top to bottom (Runtime → Run all). Provide a Hugging Face read token for
+        the gated <code>FlyRank/internship-warehouse</code> dataset when prompted.</li>
+      <li>Outputs write to <code>work/outputs/</code>: <code>priority_queue.csv</code> and four
+        chart PNGs.</li>
+    </ol>
+    <p>
+      <strong>Seeds:</strong> train/test split and Random Forest both use
+      <code>random_state=42</code>; sensitivity re-splits use seeds
+      <code>[0, 1, 42, 7, 99]</code>.
+    </p>
+    <p>
+      Full methodology notes and error analysis:
+      <a href="work/capstone_report.md">capstone_report.md</a>. Complete code, notebooks, and
+      outputs live in the
+      <a href="https://github.com/MuhammadAhmadIshtiaq/ml-internship-muhammadahmadishtiaq" target="_blank" rel="noopener">GitHub repository</a>.
+    </p>
+  </section>
+
+  <section id="credit">
+    <div class="section-num">08 — Acknowledgments</div>
+    <h2>Data credit</h2>
+    <p>Built on the <a href="https://flyrank.ai" target="_blank" rel="noopener">FlyRank ML Internship dataset</a>.</p>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <p class="credit">Built on the <a href="https://flyrank.ai" target="_blank" rel="noopener">FlyRank ML Internship dataset</a></p>
+  </div>
+</footer>
+
+</body>
+</html>

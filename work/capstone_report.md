@@ -1,6 +1,6 @@
 # Capstone Report — <your lane>
 
-- **Author:**
+- **Author: Muhammad Ahmad Ishtiaq**
 - **Lane:**
 - **Repo:**
 - **Date:**

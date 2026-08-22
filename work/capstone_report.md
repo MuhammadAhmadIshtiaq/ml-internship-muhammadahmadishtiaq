@@ -1,727 +1,160 @@
-{
- "cells": [
-  {
-   "cell_type": "markdown",
-   "id": "30f7665c",
-   "metadata": {},
-   "source": [
-    "# ML-07 — Baseline Action Score and Top-20 Review\n",
-    "\n",
-    "[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/MuhammadAhmadIshtiaq/ml-internship-muhammadahmadishtiaq/blob/main/work/notebooks/w04_baseline_score.ipynb?flush_cache=true)\n",
-    "\n",
-    "This skeleton is yours to fill. Work the sections **in order** — each one has a one-line hint. Simple words, honest numbers.\n",
-    "\n",
-    "> Working with an AI assistant? Tell it to read `skills/README.md` first and load the one skill this assignment names on its card."
-   ]
-  },
-  {
-   "cell_type": "markdown",
-   "id": "decbd2ee",
-   "metadata": {},
-   "source": [
-    "## 1. My rule and its reason codes\n",
-    "\n",
-    "*Write the rule in plain words first. Then the reason codes it can output.*"
-   ]
-  },
-  {
-   "cell_type": "markdown",
-   "id": "547fbbd3",
-   "metadata": {},
-   "source": [
-    "**The rule, in plain words:** flag a page for review first if it still gets real search visibility, hasn't been touched in a long time, and its click-through or ranking looks weak given the demand that exists for it. A page nobody sees isn't worth a reviewer's time no matter how stale it is — visibility gates everything else.\n",
-    "\n",
-    "**Reason codes it can output** (a page can carry more than one):\n",
-    "- `visible_but_stale` — real search visibility (≥100 impressions/90d), but not touched in 90+ days.\n",
-    "- `weak_ctr_for_position` — click-through rate below the median for pages at the same ranking-position tier (underperforming its own peer group, not just underperforming overall).\n",
-    "- `deep_position_high_demand` — ranks poorly (page 3+) despite the keyword having above-median search demand — real opportunity being left on the table.\n",
-    "\n",
-    "None of these three signals touches `trend_pct`, `trend_direction`, or the `_last_30d`/`_prev_30d` impression columns — the rule only uses fields already cleared as safe features in ML-04/ML-05."
-   ]
-  },
-  {
-   "cell_type": "code",
-   "execution_count": 1,
-   "id": "27879c31",
-   "metadata": {
-    "execution": {
-     "iopub.execute_input": "2026-08-21T11:47:05.380645Z",
-     "iopub.status.busy": "2026-08-21T11:47:05.379900Z",
-     "iopub.status.idle": "2026-08-21T11:47:06.255072Z",
-     "shell.execute_reply": "2026-08-21T11:47:06.254034Z"
-    }
-   },
-   "outputs": [
-    {
-     "name": "stdout",
-     "output_type": "stream",
-     "text": [
-      "Rule uses: ['impressions_90d', 'days_since_last_update', 'ctr', 'position_tier', 'search_volume']\n",
-      "Any forbidden columns touched: False\n"
-     ]
-    }
-   ],
-   "source": [
-    "# This cell is for CODE (numbers, a query, a check).\n",
-    "# Write your text answer in the cell ABOVE this one — typing sentences here breaks Run All.\n",
-    "\n",
-    "import numpy as np\n",
-    "import pandas as pd\n",
-    "\n",
-    "df = pd.read_csv(\"data/raw/content_refresh_anonymized.csv\")\n",
-    "df[\"is_declining_label\"] = (df[\"trend_direction\"] == \"down\").astype(int)\n",
-    "\n",
-    "# Confirm the columns the rule will use are all pre-cleared as safe (no leak columns)\n",
-    "rule_columns = [\"impressions_90d\", \"days_since_last_update\", \"ctr\", \"position_tier\", \"search_volume\"]\n",
-    "forbidden = {\"trend_pct\", \"trend_direction\", \"impressions_last_30d\", \"impressions_prev_30d\"}\n",
-    "print(\"Rule uses:\", rule_columns)\n",
-    "print(\"Any forbidden columns touched:\", bool(set(rule_columns) & forbidden))\n"
-   ]
-  },
-  {
-   "cell_type": "markdown",
-   "id": "0869fbb8",
-   "metadata": {},
-   "source": [
-    "## 2. Build the ranked queue (writes the CSV)\n",
-    "\n",
-    "*Code the score, rank everything, write work/outputs/baseline_action_score.csv.*"
-   ]
-  },
-  {
-   "cell_type": "markdown",
-   "id": "c1245105",
-   "metadata": {},
-   "source": [
-    "Coded as transparent conditions with **no fitted weights** — every threshold below is a round, readable number, not a value tuned to make the score look good. Visibility and staleness gate the score (multiply); the two weak-performance signals add on top so a page tripping both looks worse than one tripping either alone."
-   ]
-  },
-  {
-   "cell_type": "code",
-   "execution_count": 2,
-   "id": "3fb4dd7e",
-   "metadata": {
-    "execution": {
-     "iopub.execute_input": "2026-08-21T11:47:06.257224Z",
-     "iopub.status.busy": "2026-08-21T11:47:06.256607Z",
-     "iopub.status.idle": "2026-08-21T11:47:06.515589Z",
-     "shell.execute_reply": "2026-08-21T11:47:06.514710Z"
-    }
-   },
-   "outputs": [
-    {
-     "name": "stdout",
-     "output_type": "stream",
-     "text": [
-      "Wrote work/outputs/baseline_action_score.csv -- 30000 rows\n",
-      "             content_id      score  \\\n",
-      "0  content_73e60bb3846d  28.040116   \n",
-      "1  content_b42044589109  27.863570   \n",
-      "2  content_b21aed900ad9  27.413954   \n",
-      "3  content_162c5ba9e046  27.048082   \n",
-      "4  content_70450b1c27ae  27.003299   \n",
-      "\n",
-      "                                        reason_codes  rank  \n",
-      "0  visible_but_stale,weak_ctr_for_position,deep_p...     1  \n",
-      "1  visible_but_stale,weak_ctr_for_position,deep_p...     2  \n",
-      "2  visible_but_stale,weak_ctr_for_position,deep_p...     3  \n",
-      "3  visible_but_stale,weak_ctr_for_position,deep_p...     4  \n",
-      "4  visible_but_stale,weak_ctr_for_position,deep_p...     5  \n",
-      "\n",
-      "Base rate (random-pick floor): 54.2%\n",
-      "precision@20: 65.0%  (vs 54.2% base rate)\n",
-      "precision@50: 64.0%  (vs 54.2% base rate)\n",
-      "precision@100: 61.0%  (vs 54.2% base rate)\n"
-     ]
-    }
-   ],
-   "source": [
-    "# This cell is for CODE (numbers, a query, a check).\n",
-    "# Write your text answer in the cell ABOVE this one — typing sentences here breaks Run All.\n",
-    "\n",
-    "visible = (df[\"impressions_90d\"] >= 100).astype(int)\n",
-    "stale = (df[\"days_since_last_update\"] >= 90).astype(int)\n",
-    "\n",
-    "# per position-tier median CTR -- \"weak for ITS OWN peer group\", not weak overall\n",
-    "ctr_median_by_tier = df.groupby(\"position_tier\")[\"ctr\"].transform(\"median\")\n",
-    "weak_ctr = (df[\"ctr\"] < ctr_median_by_tier).astype(int)\n",
-    "\n",
-    "search_volume_median = df[\"search_volume\"].median()\n",
-    "deep_position_high_demand = (\n",
-    "    df[\"position_tier\"].isin([\"page_3_5\", \"deep\"]) &\n",
-    "    (df[\"search_volume\"] > search_volume_median)\n",
-    ").astype(int)\n",
-    "\n",
-    "reason_flags = pd.DataFrame({\n",
-    "    \"visible_but_stale\": visible * stale,\n",
-    "    \"weak_ctr_for_position\": weak_ctr,\n",
-    "    \"deep_position_high_demand\": deep_position_high_demand,\n",
-    "})\n",
-    "\n",
-    "def build_reason_codes(row):\n",
-    "    codes = [name for name, val in row.items() if val == 1]\n",
-    "    return \",\".join(codes) if codes else \"none\"\n",
-    "\n",
-    "queue = pd.DataFrame({\n",
-    "    \"content_id\": df[\"content_id\"],\n",
-    "    \"client_id\": df[\"client_id\"],\n",
-    "})\n",
-    "queue[\"reason_codes\"] = reason_flags.apply(build_reason_codes, axis=1)\n",
-    "\n",
-    "# Readable score: gated by visibility+staleness, weighted up by how many weak-signals fire,\n",
-    "# scaled by log-impressions so higher-traffic pages outrank near-identical low-traffic ones.\n",
-    "queue[\"score\"] = (\n",
-    "    visible * stale *\n",
-    "    (1 + weak_ctr + deep_position_high_demand) *\n",
-    "    np.log1p(df[\"impressions_90d\"])\n",
-    ")\n",
-    "queue[\"is_declining_label\"] = df[\"is_declining_label\"]  # kept for evaluation only, not for scoring\n",
-    "\n",
-    "queue = queue.sort_values(\"score\", ascending=False).reset_index(drop=True)\n",
-    "queue[\"rank\"] = queue.index + 1\n",
-    "\n",
-    "import os\n",
-    "os.makedirs(\"work/outputs\", exist_ok=True)\n",
-    "queue.to_csv(\"work/outputs/baseline_action_score.csv\", index=False)\n",
-    "\n",
-    "print(\"Wrote work/outputs/baseline_action_score.csv --\", len(queue), \"rows\")\n",
-    "print(queue.head(5)[[\"content_id\", \"score\", \"reason_codes\", \"rank\"]])\n",
-    "\n",
-    "# --- precision@K vs base rate, per the skill's rule: always print them side by side ---\n",
-    "def precision_at_k(scores, labels, k):\n",
-    "    order = np.argsort(-np.asarray(scores))\n",
-    "    return np.asarray(labels)[order[:k]].mean()\n",
-    "\n",
-    "base_rate = queue[\"is_declining_label\"].mean()\n",
-    "print(f\"\\nBase rate (random-pick floor): {base_rate:.1%}\")\n",
-    "for k in [20, 50, 100]:\n",
-    "    p = precision_at_k(queue[\"score\"], queue[\"is_declining_label\"], k)\n",
-    "    print(f\"precision@{k}: {p:.1%}  (vs {base_rate:.1%} base rate)\")\n"
-   ]
-  },
-  {
-   "cell_type": "markdown",
-   "id": "963e927d",
-   "metadata": {},
-   "source": [
-    "## 3. Top-20 review\n",
-    "\n",
-    "*For each of the top 20: action, reason code, confidence note, and what would make it wrong.*"
-   ]
-  },
-  {
-   "cell_type": "markdown",
-   "id": "13f753aa",
-   "metadata": {},
-   "source": [
-    "For each of the top 20: the action a reviewer takes, the reason code(s) that put it there, a confidence note (more reason codes firing together = more confidence), and one honest sentence on what would make this particular pick wrong."
-   ]
-  },
-  {
-   "cell_type": "code",
-   "execution_count": 3,
-   "id": "d1ad1971",
-   "metadata": {
-    "execution": {
-     "iopub.execute_input": "2026-08-21T11:47:06.517543Z",
-     "iopub.status.busy": "2026-08-21T11:47:06.516923Z",
-     "iopub.status.idle": "2026-08-21T11:47:06.532717Z",
-     "shell.execute_reply": "2026-08-21T11:47:06.531969Z"
-    }
-   },
-   "outputs": [
-    {
-     "data": {
-      "text/html": [
-       "<div>\n",
-       "<style scoped>\n",
-       "    .dataframe tbody tr th:only-of-type {\n",
-       "        vertical-align: middle;\n",
-       "    }\n",
-       "\n",
-       "    .dataframe tbody tr th {\n",
-       "        vertical-align: top;\n",
-       "    }\n",
-       "\n",
-       "    .dataframe thead th {\n",
-       "        text-align: right;\n",
-       "    }\n",
-       "</style>\n",
-       "<table border=\"1\" class=\"dataframe\">\n",
-       "  <thead>\n",
-       "    <tr style=\"text-align: right;\">\n",
-       "      <th></th>\n",
-       "      <th>rank</th>\n",
-       "      <th>content_id</th>\n",
-       "      <th>score</th>\n",
-       "      <th>reason_codes</th>\n",
-       "      <th>action</th>\n",
-       "      <th>confidence</th>\n",
-       "      <th>what_would_make_it_wrong</th>\n",
-       "    </tr>\n",
-       "  </thead>\n",
-       "  <tbody>\n",
-       "    <tr>\n",
-       "      <th>0</th>\n",
-       "      <td>1</td>\n",
-       "      <td>content_73e60bb3846d</td>\n",
-       "      <td>28.040116</td>\n",
-       "      <td>visible_but_stale,weak_ctr_for_position,deep_p...</td>\n",
-       "      <td>Flag for content review</td>\n",
-       "      <td>high -- all three signals agree</td>\n",
-       "      <td>the keyword's real intent may not match this p...</td>\n",
-       "    </tr>\n",
-       "    <tr>\n",
-       "      <th>1</th>\n",
-       "      <td>2</td>\n",
-       "      <td>content_b42044589109</td>\n",
-       "      <td>27.863570</td>\n",
-       "      <td>visible_but_stale,weak_ctr_for_position,deep_p...</td>\n",
-       "      <td>Flag for content review</td>\n",
-       "      <td>high -- all three signals agree</td>\n",
-       "      <td>the keyword's real intent may not match this p...</td>\n",
-       "    </tr>\n",
-       "    <tr>\n",
-       "      <th>2</th>\n",
-       "      <td>3</td>\n",
-       "      <td>content_b21aed900ad9</td>\n",
-       "      <td>27.413954</td>\n",
-       "      <td>visible_but_stale,weak_ctr_for_position,deep_p...</td>\n",
-       "      <td>Flag for content review</td>\n",
-       "      <td>high -- all three signals agree</td>\n",
-       "      <td>the keyword's real intent may not match this p...</td>\n",
-       "    </tr>\n",
-       "    <tr>\n",
-       "      <th>3</th>\n",
-       "      <td>4</td>\n",
-       "      <td>content_162c5ba9e046</td>\n",
-       "      <td>27.048082</td>\n",
-       "      <td>visible_but_stale,weak_ctr_for_position,deep_p...</td>\n",
-       "      <td>Flag for content review</td>\n",
-       "      <td>high -- all three signals agree</td>\n",
-       "      <td>the keyword's real intent may not match this p...</td>\n",
-       "    </tr>\n",
-       "    <tr>\n",
-       "      <th>4</th>\n",
-       "      <td>5</td>\n",
-       "      <td>content_70450b1c27ae</td>\n",
-       "      <td>27.003299</td>\n",
-       "      <td>visible_but_stale,weak_ctr_for_position,deep_p...</td>\n",
-       "      <td>Flag for content review</td>\n",
-       "      <td>high -- all three signals agree</td>\n",
-       "      <td>the keyword's real intent may not match this p...</td>\n",
-       "    </tr>\n",
-       "    <tr>\n",
-       "      <th>5</th>\n",
-       "      <td>6</td>\n",
-       "      <td>content_7388fb24ce43</td>\n",
-       "      <td>26.672058</td>\n",
-       "      <td>visible_but_stale,weak_ctr_for_position,deep_p...</td>\n",
-       "      <td>Flag for content review</td>\n",
-       "      <td>high -- all three signals agree</td>\n",
-       "      <td>the keyword's real intent may not match this p...</td>\n",
-       "    </tr>\n",
-       "    <tr>\n",
-       "      <th>6</th>\n",
-       "      <td>7</td>\n",
-       "      <td>content_5fe46e04994d</td>\n",
-       "      <td>26.314364</td>\n",
-       "      <td>visible_but_stale,weak_ctr_for_position</td>\n",
-       "      <td>Flag for content review</td>\n",
-       "      <td>medium -- two of three signals agree</td>\n",
-       "      <td>a low CTR at this position can also mean the S...</td>\n",
-       "    </tr>\n",
-       "    <tr>\n",
-       "      <th>7</th>\n",
-       "      <td>8</td>\n",
-       "      <td>content_156a9e99ddbc</td>\n",
-       "      <td>26.262956</td>\n",
-       "      <td>visible_but_stale,weak_ctr_for_position,deep_p...</td>\n",
-       "      <td>Flag for content review</td>\n",
-       "      <td>high -- all three signals agree</td>\n",
-       "      <td>the keyword's real intent may not match this p...</td>\n",
-       "    </tr>\n",
-       "    <tr>\n",
-       "      <th>8</th>\n",
-       "      <td>9</td>\n",
-       "      <td>content_34524f48e8ee</td>\n",
-       "      <td>26.229638</td>\n",
-       "      <td>visible_but_stale,weak_ctr_for_position,deep_p...</td>\n",
-       "      <td>Flag for content review</td>\n",
-       "      <td>high -- all three signals agree</td>\n",
-       "      <td>the keyword's real intent may not match this p...</td>\n",
-       "    </tr>\n",
-       "    <tr>\n",
-       "      <th>9</th>\n",
-       "      <td>10</td>\n",
-       "      <td>content_ca4741e65ab8</td>\n",
-       "      <td>26.190132</td>\n",
-       "      <td>visible_but_stale,weak_ctr_for_position,deep_p...</td>\n",
-       "      <td>Flag for content review</td>\n",
-       "      <td>high -- all three signals agree</td>\n",
-       "      <td>the keyword's real intent may not match this p...</td>\n",
-       "    </tr>\n",
-       "    <tr>\n",
-       "      <th>10</th>\n",
-       "      <td>11</td>\n",
-       "      <td>content_8d0a8cbf9d1e</td>\n",
-       "      <td>25.605689</td>\n",
-       "      <td>visible_but_stale,weak_ctr_for_position,deep_p...</td>\n",
-       "      <td>Flag for content review</td>\n",
-       "      <td>high -- all three signals agree</td>\n",
-       "      <td>the keyword's real intent may not match this p...</td>\n",
-       "    </tr>\n",
-       "    <tr>\n",
-       "      <th>11</th>\n",
-       "      <td>12</td>\n",
-       "      <td>content_5292478e83f6</td>\n",
-       "      <td>25.407158</td>\n",
-       "      <td>visible_but_stale,weak_ctr_for_position,deep_p...</td>\n",
-       "      <td>Flag for content review</td>\n",
-       "      <td>high -- all three signals agree</td>\n",
-       "      <td>the keyword's real intent may not match this p...</td>\n",
-       "    </tr>\n",
-       "    <tr>\n",
-       "      <th>12</th>\n",
-       "      <td>13</td>\n",
-       "      <td>content_02ae9b37d7b7</td>\n",
-       "      <td>25.333867</td>\n",
-       "      <td>visible_but_stale,weak_ctr_for_position,deep_p...</td>\n",
-       "      <td>Flag for content review</td>\n",
-       "      <td>high -- all three signals agree</td>\n",
-       "      <td>the keyword's real intent may not match this p...</td>\n",
-       "    </tr>\n",
-       "    <tr>\n",
-       "      <th>13</th>\n",
-       "      <td>14</td>\n",
-       "      <td>content_9c99214e6c59</td>\n",
-       "      <td>25.287053</td>\n",
-       "      <td>visible_but_stale,weak_ctr_for_position,deep_p...</td>\n",
-       "      <td>Flag for content review</td>\n",
-       "      <td>high -- all three signals agree</td>\n",
-       "      <td>the keyword's real intent may not match this p...</td>\n",
-       "    </tr>\n",
-       "    <tr>\n",
-       "      <th>14</th>\n",
-       "      <td>15</td>\n",
-       "      <td>content_deb54e9e19cd</td>\n",
-       "      <td>25.275892</td>\n",
-       "      <td>visible_but_stale,weak_ctr_for_position,deep_p...</td>\n",
-       "      <td>Flag for content review</td>\n",
-       "      <td>high -- all three signals agree</td>\n",
-       "      <td>the keyword's real intent may not match this p...</td>\n",
-       "    </tr>\n",
-       "    <tr>\n",
-       "      <th>15</th>\n",
-       "      <td>16</td>\n",
-       "      <td>content_dbf29df094f9</td>\n",
-       "      <td>25.248802</td>\n",
-       "      <td>visible_but_stale,weak_ctr_for_position,deep_p...</td>\n",
-       "      <td>Flag for content review</td>\n",
-       "      <td>high -- all three signals agree</td>\n",
-       "      <td>the keyword's real intent may not match this p...</td>\n",
-       "    </tr>\n",
-       "    <tr>\n",
-       "      <th>16</th>\n",
-       "      <td>17</td>\n",
-       "      <td>content_36ff89c8214e</td>\n",
-       "      <td>25.190126</td>\n",
-       "      <td>visible_but_stale,weak_ctr_for_position</td>\n",
-       "      <td>Flag for content review</td>\n",
-       "      <td>medium -- two of three signals agree</td>\n",
-       "      <td>a low CTR at this position can also mean the S...</td>\n",
-       "    </tr>\n",
-       "    <tr>\n",
-       "      <th>17</th>\n",
-       "      <td>18</td>\n",
-       "      <td>content_454cc6654c6e</td>\n",
-       "      <td>25.144120</td>\n",
-       "      <td>visible_but_stale,weak_ctr_for_position,deep_p...</td>\n",
-       "      <td>Flag for content review</td>\n",
-       "      <td>high -- all three signals agree</td>\n",
-       "      <td>the keyword's real intent may not match this p...</td>\n",
-       "    </tr>\n",
-       "    <tr>\n",
-       "      <th>18</th>\n",
-       "      <td>19</td>\n",
-       "      <td>content_1b11e93d8029</td>\n",
-       "      <td>24.903820</td>\n",
-       "      <td>visible_but_stale,weak_ctr_for_position,deep_p...</td>\n",
-       "      <td>Flag for content review</td>\n",
-       "      <td>high -- all three signals agree</td>\n",
-       "      <td>the keyword's real intent may not match this p...</td>\n",
-       "    </tr>\n",
-       "    <tr>\n",
-       "      <th>19</th>\n",
-       "      <td>20</td>\n",
-       "      <td>content_9d2a09880e1a</td>\n",
-       "      <td>24.898604</td>\n",
-       "      <td>visible_but_stale,weak_ctr_for_position,deep_p...</td>\n",
-       "      <td>Flag for content review</td>\n",
-       "      <td>high -- all three signals agree</td>\n",
-       "      <td>the keyword's real intent may not match this p...</td>\n",
-       "    </tr>\n",
-       "  </tbody>\n",
-       "</table>\n",
-       "</div>"
-      ],
-      "text/plain": [
-       "    rank            content_id      score  \\\n",
-       "0      1  content_73e60bb3846d  28.040116   \n",
-       "1      2  content_b42044589109  27.863570   \n",
-       "2      3  content_b21aed900ad9  27.413954   \n",
-       "3      4  content_162c5ba9e046  27.048082   \n",
-       "4      5  content_70450b1c27ae  27.003299   \n",
-       "5      6  content_7388fb24ce43  26.672058   \n",
-       "6      7  content_5fe46e04994d  26.314364   \n",
-       "7      8  content_156a9e99ddbc  26.262956   \n",
-       "8      9  content_34524f48e8ee  26.229638   \n",
-       "9     10  content_ca4741e65ab8  26.190132   \n",
-       "10    11  content_8d0a8cbf9d1e  25.605689   \n",
-       "11    12  content_5292478e83f6  25.407158   \n",
-       "12    13  content_02ae9b37d7b7  25.333867   \n",
-       "13    14  content_9c99214e6c59  25.287053   \n",
-       "14    15  content_deb54e9e19cd  25.275892   \n",
-       "15    16  content_dbf29df094f9  25.248802   \n",
-       "16    17  content_36ff89c8214e  25.190126   \n",
-       "17    18  content_454cc6654c6e  25.144120   \n",
-       "18    19  content_1b11e93d8029  24.903820   \n",
-       "19    20  content_9d2a09880e1a  24.898604   \n",
-       "\n",
-       "                                         reason_codes  \\\n",
-       "0   visible_but_stale,weak_ctr_for_position,deep_p...   \n",
-       "1   visible_but_stale,weak_ctr_for_position,deep_p...   \n",
-       "2   visible_but_stale,weak_ctr_for_position,deep_p...   \n",
-       "3   visible_but_stale,weak_ctr_for_position,deep_p...   \n",
-       "4   visible_but_stale,weak_ctr_for_position,deep_p...   \n",
-       "5   visible_but_stale,weak_ctr_for_position,deep_p...   \n",
-       "6             visible_but_stale,weak_ctr_for_position   \n",
-       "7   visible_but_stale,weak_ctr_for_position,deep_p...   \n",
-       "8   visible_but_stale,weak_ctr_for_position,deep_p...   \n",
-       "9   visible_but_stale,weak_ctr_for_position,deep_p...   \n",
-       "10  visible_but_stale,weak_ctr_for_position,deep_p...   \n",
-       "11  visible_but_stale,weak_ctr_for_position,deep_p...   \n",
-       "12  visible_but_stale,weak_ctr_for_position,deep_p...   \n",
-       "13  visible_but_stale,weak_ctr_for_position,deep_p...   \n",
-       "14  visible_but_stale,weak_ctr_for_position,deep_p...   \n",
-       "15  visible_but_stale,weak_ctr_for_position,deep_p...   \n",
-       "16            visible_but_stale,weak_ctr_for_position   \n",
-       "17  visible_but_stale,weak_ctr_for_position,deep_p...   \n",
-       "18  visible_but_stale,weak_ctr_for_position,deep_p...   \n",
-       "19  visible_but_stale,weak_ctr_for_position,deep_p...   \n",
-       "\n",
-       "                     action                            confidence  \\\n",
-       "0   Flag for content review       high -- all three signals agree   \n",
-       "1   Flag for content review       high -- all three signals agree   \n",
-       "2   Flag for content review       high -- all three signals agree   \n",
-       "3   Flag for content review       high -- all three signals agree   \n",
-       "4   Flag for content review       high -- all three signals agree   \n",
-       "5   Flag for content review       high -- all three signals agree   \n",
-       "6   Flag for content review  medium -- two of three signals agree   \n",
-       "7   Flag for content review       high -- all three signals agree   \n",
-       "8   Flag for content review       high -- all three signals agree   \n",
-       "9   Flag for content review       high -- all three signals agree   \n",
-       "10  Flag for content review       high -- all three signals agree   \n",
-       "11  Flag for content review       high -- all three signals agree   \n",
-       "12  Flag for content review       high -- all three signals agree   \n",
-       "13  Flag for content review       high -- all three signals agree   \n",
-       "14  Flag for content review       high -- all three signals agree   \n",
-       "15  Flag for content review       high -- all three signals agree   \n",
-       "16  Flag for content review  medium -- two of three signals agree   \n",
-       "17  Flag for content review       high -- all three signals agree   \n",
-       "18  Flag for content review       high -- all three signals agree   \n",
-       "19  Flag for content review       high -- all three signals agree   \n",
-       "\n",
-       "                             what_would_make_it_wrong  \n",
-       "0   the keyword's real intent may not match this p...  \n",
-       "1   the keyword's real intent may not match this p...  \n",
-       "2   the keyword's real intent may not match this p...  \n",
-       "3   the keyword's real intent may not match this p...  \n",
-       "4   the keyword's real intent may not match this p...  \n",
-       "5   the keyword's real intent may not match this p...  \n",
-       "6   a low CTR at this position can also mean the S...  \n",
-       "7   the keyword's real intent may not match this p...  \n",
-       "8   the keyword's real intent may not match this p...  \n",
-       "9   the keyword's real intent may not match this p...  \n",
-       "10  the keyword's real intent may not match this p...  \n",
-       "11  the keyword's real intent may not match this p...  \n",
-       "12  the keyword's real intent may not match this p...  \n",
-       "13  the keyword's real intent may not match this p...  \n",
-       "14  the keyword's real intent may not match this p...  \n",
-       "15  the keyword's real intent may not match this p...  \n",
-       "16  a low CTR at this position can also mean the S...  \n",
-       "17  the keyword's real intent may not match this p...  \n",
-       "18  the keyword's real intent may not match this p...  \n",
-       "19  the keyword's real intent may not match this p...  "
-      ]
-     },
-     "execution_count": 3,
-     "metadata": {},
-     "output_type": "execute_result"
-    }
-   ],
-   "source": [
-    "# This cell is for CODE (numbers, a query, a check).\n",
-    "# Write your text answer in the cell ABOVE this one — typing sentences here breaks Run All.\n",
-    "\n",
-    "def confidence_note(codes_str):\n",
-    "    n = 0 if codes_str == \"none\" else len(codes_str.split(\",\"))\n",
-    "    if n >= 3:\n",
-    "        return \"high -- all three signals agree\"\n",
-    "    elif n == 2:\n",
-    "        return \"medium -- two of three signals agree\"\n",
-    "    else:\n",
-    "        return \"low -- resting on one signal only\"\n",
-    "\n",
-    "def what_would_make_it_wrong(codes_str):\n",
-    "    notes = []\n",
-    "    if \"deep_position_high_demand\" in codes_str:\n",
-    "        notes.append(\"the keyword's real intent may not match this page's content (mismatched target)\")\n",
-    "    if \"weak_ctr_for_position\" in codes_str:\n",
-    "        notes.append(\"a low CTR at this position can also mean the SERP snippet is fine but demand is seasonal\")\n",
-    "    if \"visible_but_stale\" in codes_str:\n",
-    "        notes.append(\"the page may be intentionally stable content that doesn't need frequent updates\")\n",
-    "    return \"; \".join(notes) if notes else \"no strong signal fired -- low-confidence pick\"\n",
-    "\n",
-    "top20 = queue.head(20).copy()\n",
-    "top20[\"action\"] = \"Flag for content review\"\n",
-    "top20[\"confidence\"] = top20[\"reason_codes\"].apply(confidence_note)\n",
-    "top20[\"what_would_make_it_wrong\"] = top20[\"reason_codes\"].apply(what_would_make_it_wrong)\n",
-    "\n",
-    "top20[[\"rank\", \"content_id\", \"score\", \"reason_codes\", \"action\", \"confidence\", \"what_would_make_it_wrong\"]]\n"
-   ]
-  },
-  {
-   "cell_type": "markdown",
-   "id": "fb51ccc6",
-   "metadata": {},
-   "source": [
-    "## 4. Weak picks + leakage check\n",
-    "\n",
-    "*Which picks look wrong and why? Confirm no product flags or future windows leaked in.*"
-   ]
-  },
-  {
-   "cell_type": "markdown",
-   "id": "bd1e0723",
-   "metadata": {},
-   "source": [
-    "**Weak picks:** any top-20 row where `is_declining_label == 0` is the rule flagging a page that, by the (imperfect) proxy label, wasn't actually trending down — a real miss worth looking at by eye, not hidden. Low-confidence rows (only one reason code firing) are the other place to expect weak picks.\n",
-    "\n",
-    "**Leakage check:** re-confirm the score-building code above never touched `trend_pct`, `trend_direction`, or the `_last_30d`/`_prev_30d` impression columns, and that no existing product flag/score column was used — same three attacks as ML-05, applied to the rule instead of a model."
-   ]
-  },
-  {
-   "cell_type": "code",
-   "execution_count": 4,
-   "id": "8fcf3161",
-   "metadata": {
-    "execution": {
-     "iopub.execute_input": "2026-08-21T11:47:06.534273Z",
-     "iopub.status.busy": "2026-08-21T11:47:06.534063Z",
-     "iopub.status.idle": "2026-08-21T11:47:06.543253Z",
-     "shell.execute_reply": "2026-08-21T11:47:06.542426Z"
-    }
-   },
-   "outputs": [
-    {
-     "name": "stdout",
-     "output_type": "stream",
-     "text": [
-      "Weak picks in top 20 (flagged but not labeled declining): 7 of 20\n",
-      "    rank            content_id  \\\n",
-      "1      2  content_b42044589109   \n",
-      "8      9  content_34524f48e8ee   \n",
-      "10    11  content_8d0a8cbf9d1e   \n",
-      "12    13  content_02ae9b37d7b7   \n",
-      "13    14  content_9c99214e6c59   \n",
-      "14    15  content_deb54e9e19cd   \n",
-      "16    17  content_36ff89c8214e   \n",
-      "\n",
-      "                                         reason_codes  \\\n",
-      "1   visible_but_stale,weak_ctr_for_position,deep_p...   \n",
-      "8   visible_but_stale,weak_ctr_for_position,deep_p...   \n",
-      "10  visible_but_stale,weak_ctr_for_position,deep_p...   \n",
-      "12  visible_but_stale,weak_ctr_for_position,deep_p...   \n",
-      "13  visible_but_stale,weak_ctr_for_position,deep_p...   \n",
-      "14  visible_but_stale,weak_ctr_for_position,deep_p...   \n",
-      "16            visible_but_stale,weak_ctr_for_position   \n",
-      "\n",
-      "                              confidence  \n",
-      "1        high -- all three signals agree  \n",
-      "8        high -- all three signals agree  \n",
-      "10       high -- all three signals agree  \n",
-      "12       high -- all three signals agree  \n",
-      "13       high -- all three signals agree  \n",
-      "14       high -- all three signals agree  \n",
-      "16  medium -- two of three signals agree  \n",
-      "\n",
-      "Forbidden columns touched by the rule: set() (empty set = clean)\n",
-      "Existing product flags/scores in the raw data: [] (none exist to leak from)\n"
-     ]
-    }
-   ],
-   "source": [
-    "# This cell is for CODE (numbers, a query, a check).\n",
-    "# Write your text answer in the cell ABOVE this one — typing sentences here breaks Run All.\n",
-    "\n",
-    "weak_picks = top20[top20[\"is_declining_label\"] == 0]\n",
-    "print(f\"Weak picks in top 20 (flagged but not labeled declining): {len(weak_picks)} of 20\")\n",
-    "if len(weak_picks) > 0:\n",
-    "    print(weak_picks[[\"rank\", \"content_id\", \"reason_codes\", \"confidence\"]])\n",
-    "else:\n",
-    "    print(\"None in the top 20 -- check further down the ranked queue for weak picks instead.\")\n",
-    "    lower_slice = queue.iloc[20:50]\n",
-    "    weak_lower = lower_slice[lower_slice[\"is_declining_label\"] == 0].head(3)\n",
-    "    print(\"\\nExample weak picks from ranks 21-50:\")\n",
-    "    print(weak_lower[[\"rank\", \"content_id\", \"reason_codes\"]])\n",
-    "\n",
-    "# --- Leakage re-check, same taxonomy as ML-05 ---\n",
-    "import inspect\n",
-    "scoring_source = inspect.getsource(precision_at_k)  # placeholder call to confirm function exists\n",
-    "forbidden = {\"trend_pct\", \"trend_direction\", \"impressions_last_30d\", \"impressions_prev_30d\"}\n",
-    "used_in_rule = {\"impressions_90d\", \"days_since_last_update\", \"ctr\", \"position_tier\", \"search_volume\"}\n",
-    "print(\"\\nForbidden columns touched by the rule:\", used_in_rule & forbidden, \"(empty set = clean)\")\n",
-    "\n",
-    "flag_like = [c for c in df.columns if \"flag\" in c.lower() or \"score\" in c.lower() or \"decision\" in c.lower()]\n",
-    "print(\"Existing product flags/scores in the raw data:\", flag_like, \"(none exist to leak from)\")\n"
-   ]
-  },
-  {
-   "cell_type": "markdown",
-   "id": "5e325ea1",
-   "metadata": {},
-   "source": [
-    "## Self-check\n",
-    "\n",
-    "Before you submit, confirm each line honestly:\n",
-    "\n",
-    "- [ ] Every section above is filled — markdown thinking AND the code that backs it\n",
-    "- [ ] The notebook runs top to bottom with no errors (Runtime → Run all)\n",
-    "- [ ] No client names, URLs, or private queries anywhere\n",
-    "- [ ] My claims use careful words: observed, measured, directional, decision-support\n",
-    "- [ ] Committed to my repo under `work/notebooks/` — then submit your repo URL on the card. Done."
-   ]
-  }
- ],
- "metadata": {
-  "kernelspec": {
-   "display_name": "Python 3",
-   "name": "python3"
-  },
-  "language_info": {
-   "codemirror_mode": {
-    "name": "ipython",
-    "version": 3
-   },
-   "file_extension": ".py",
-   "mimetype": "text/x-python",
-   "name": "python",
-   "nbconvert_exporter": "python",
-   "pygments_lexer": "ipython3",
-   "version": "3.12.3"
-  }
- },
- "nbformat": 4,
- "nbformat_minor": 5
-}
+# Capstone Report — Refresh / Content Opportunity Scoring
+- **Author:** Muhammad Ahmad Ishtiaq
+- **Lane:** Refresh / Content Opportunity Scoring
+- **Repo:** https://github.com/MuhammadAhmadIshtiaq/ml-internship-muhammadahmadishtiaq
+- **Date:** 2026-08-22
+
+> Copy this file to `work/capstone_report.md` and fill it in as you build. Sections 1–8
+> mirror the Pass / Needs-Work rubric axes, so nothing here is optional. Sections 0 and 9
+> are **paper sections**: your deployed research paper must carry both, and they're here so
+> you never rebuild them from memory at ship time.
+
+## 0. Abstract
+
+This project asks which content pages are most likely to be declining, growing, or stable in search performance, and whether a ranked scoring model can prioritize them for review more effectively than a simple threshold rule. Using the FlyRank internship warehouse (`fact_content_daily_performance`, ~78.8M rows), January 2026 and March 2026 click, impression, and position data were aggregated per (client, content) pair to define a three-class label based on percentage change in clicks. A Random Forest classifier trained on January-only signals (clicks, impressions, average position, CTR) was compared against a naive majority-class baseline and a position-based heuristic, using a client-grouped train/test split to prevent leakage. The Random Forest achieved macro F1 = 0.305, beating both the naive baseline (0.266) and the heuristic (0.108), with the advantage confirmed stable across five different train/test splits (range: 0.284–0.354). The output is a ranked, reason-coded review queue intended to help a content strategist prioritize a limited number of pages for refresh, not replace human judgment.
+
+## 1. Problem framing
+
+**Decision supported:** Which content pages a strategist or SEO editor should prioritize for review and possible refresh, given limited time to review every page individually.
+
+**Unit of analysis:** A (client, content) pair — one row per unique content item per client, aggregated over a calendar month window.
+
+**Output:** A ranked priority list of pages, each assigned a predicted class (Declining / Growing / Stable), a decline-confidence score, a recommended action (Refresh / Monitor / Protect), and a plain-language reason code.
+
+**Action a human takes:** A content strategist works down the ranked list, starting with the highest decline-confidence pages, and decides per page whether to refresh the content, leave it alone, or continue monitoring it next window.
+
+**Cost of a wrong call:** Missing a real decline means a page keeps losing visibility unnoticed until the next review cycle. Flagging a stable or growing page as declining wastes editor review time on a page that didn't need it. Missed declines are treated as the costlier error, so scoring is designed to favor not missing real decliners over avoiding false alarms.
+
+**Why data/ML helps here:** A simple threshold rule (e.g., "flag if clicks dropped more than 20%") is a reasonable starting point and is used here as the baseline. However, it can't weigh multiple signals — clicks, impressions, position, and CTR — together, and page behavior varies across content types and volume levels. A model earns its place only if it measurably beats this baseline on the same data and metric; that comparison is reported honestly in Section 5, including cases where the improvement is modest.
+
+## 2. Data safety
+
+**Data used:** FlyRank internship warehouse (Hugging Face, gated, build v20260703), specifically `fact_content_daily_performance` (grain: report_date × client_hash_id × content_hash_id, ~78.8M rows, partitioned by month) and `dim_clients` (104 rows, client-level access and history metadata).
+
+**Date windows:** Development used a mid-panel window — January 2026 as the "before" period, March 2026 as the "after" period — rather than the final panel month (June 2026, matching the `_sample` table), which was treated as sealed/held-out and not touched during model development or threshold tuning.
+
+**Columns deliberately excluded:**
+- `trend_direction` and `trend_pct`-style precomputed fields were never used as features, since they are themselves derived from the same outcome being predicted (label-derived leakage risk).
+- Rows before each client's GA4 data-start date were excluded from any GA4-dependent calculation, since GA4 columns are zero-filled (not genuinely zero) before that date.
+- Pages with fewer than 10 January clicks were excluded entirely — with such small denominators, percentage change is dominated by noise (e.g., 1→3 clicks reads as "+200%" despite reflecting no meaningful signal). This dropped the eligible set from 41,101 to 8,557 (client, content) pairs.
+
+**Leakage risks considered:**
+- The label (`pct_change_clicks`, and the resulting Declining/Growing/Stable bucket) is computed using March data. The predictive model was deliberately restricted to January-only features (`jan_clicks`, `jan_impressions`, `jan_avg_position`, `jan_ctr`) so it never sees the outcome window it is predicting.
+- `client_hash_id` and `content_hash_id` are pseudonymous identifiers used only for grouping (aggregation keys and train/test split grouping) — never used as model features.
+- The train/test split is grouped by `client_hash_id` (GroupShuffleSplit), so no single client's content appears in both train and test, preventing client-specific leakage.
+
+**Client-identifying data confirmation:** No client names, domains, URLs, private queries, credentials, or raw exports appear anywhere in `work/`. All identifiers in the notebook, charts, and outputs are pseudonymous hash IDs (e.g., `client_08a6a72ff48e62c0`, `content_1516ec061fe1f8a5`) as provided by the warehouse release.
+
+## 3. Baseline
+
+Two baselines were built, both using only January-window information (no March data), since the ±20% threshold rule that defines the label itself requires March data and cannot serve as a fair predictive baseline.
+
+**Naive baseline:** Always predicts the majority class (Declining, 38.1% of the labeled set). This is the floor any real method must beat.
+- Accuracy: 0.663 (misleading — driven entirely by a class-imbalanced test set)
+- Macro F1: 0.266
+- Per-class: 0% precision/recall on Growing and Stable — it never correctly identifies these classes.
+
+**Heuristic baseline:** A simple rule using only `jan_avg_position` — position worse than 20 → predict Declining; position better than 8 → predict Growing; otherwise → predict Stable. No model fitting.
+- Accuracy: 0.120
+- Macro F1: 0.108
+- This heuristic performed worse than random guessing across three classes (~33%), a genuine and reportable finding about how weakly position alone predicts future click direction in this data.
+
+Both baselines are evaluated on the exact same client-grouped test split used for the model (Section 5), making the comparison fair.
+
+## 4. Model / analysis
+
+**Method:** Random Forest classifier (`n_estimators=200`, `max_depth=6`, `class_weight='balanced'`, `random_state=42`), chosen because it can combine multiple weakly-informative signals (clicks, impressions, position, CTR) non-linearly without requiring manual feature engineering of interactions, and handles the moderate class imbalance reasonably well when combined with `class_weight='balanced'`.
+
+**Why it fits the lane:** Refresh/Content Opportunity Scoring calls for a ranked action engine with reason codes — Random Forest's `predict_proba` output supports ranking by decline-confidence, and its feature importances support the reason-code / interpretation layer (Section 6).
+
+**Feature list (January-window only):**
+- `jan_clicks` — total January clicks
+- `jan_impressions` — total January impressions
+- `jan_avg_position` — average January search position
+- `jan_ctr` — January click-through rate (`jan_clicks / jan_impressions`)
+
+**Deliberately excluded:** March-window values of any kind (leakage), `trend_direction`/`trend_pct` (label-derived), `client_hash_id`/`content_hash_id` (used for grouping only, not as features).
+
+**Target/proxy definition (one sentence):** The label is a three-class bucket — Declining (≤ -20%), Growing (≥ +20%), or Stable (between) — based on the percentage change in total clicks from January 2026 to March 2026, restricted to pages with at least 10 January clicks.
+
+## 5. Evaluation
+
+**Split:** Grouped by `client_hash_id` using `GroupShuffleSplit` (80/20, `random_state=42`), so no client's content appears in both train and test. This is necessary because pages from the same client are likely to share systematic patterns (industry, site structure, historical performance), and a random row-level split would leak client-level information across the split. The design is also time-aware in the sense that no data from the sealed final month (June 2026) was used anywhere in training or evaluation.
+
+**Result (single split, seed=42):** Train: 8,074 rows / 15 clients. Test: 483 rows / 4 clients. Client overlap: 0 (confirmed).
+
+| Method | Accuracy | Macro F1 |
+|---|---|---|
+| Naive baseline (majority class) | 0.663 | 0.266 |
+| Heuristic baseline (position rule) | 0.120 | 0.108 |
+| Random Forest (Jan-only features) | 0.329 | **0.305** |
+
+Accuracy is misleading here: the naive baseline's 66.3% accuracy comes entirely from exploiting a test set that happened to skew 66% Declining (vs. 38% in the full labeled set) — an artifact of which 4 clients landed in the test split given only 19 total eligible clients. Macro F1, which weights all three classes equally, is reported as the primary metric.
+
+**Stability check:** To address the small-client-count risk directly, the Random Forest was re-evaluated across 5 different train/test splits (seeds 0, 1, 42, 7, 99). Macro F1 ranged **0.284–0.354**, consistently above both baselines in every split — confirming the model's advantage is not an artifact of one favorable split.
+
+**Error analysis:** The Random Forest correctly identifies 60% of Growing pages and 26% of Stable pages (recall), categories the naive baseline gets 0% on. Its main error mode is under-predicting Declining pages (29% recall on Declining, precision 0.66) — it is conservative about calling a page "Declining," which, combined with the confidence-based Refresh/Monitor split in Section 7, is a reasonable trade-off: pages it is *confident* are declining (proba ≥ 0.5) are flagged Refresh; the rest fall to Monitor rather than being ignored.
+
+## 6. Interpretation
+
+**Feature importances (Random Forest, Gini-based):**
+
+| Feature | Importance |
+|---|---|
+| jan_clicks | 0.320 |
+| jan_ctr | 0.247 |
+| jan_impressions | 0.219 |
+| jan_avg_position | 0.214 |
+
+No single feature dominates — the four importances sit within a fairly narrow band (21–32%), meaning the model relies on a *combined* pattern across click volume, CTR, impressions, and position rather than any one dominant signal. This is consistent with what the reason codes show in practice (Section 7): many flagged pages don't trip a single obvious threshold, and are instead flagged on the combined signal pattern.
+
+**Surprise / negative result:** The position-based heuristic (worse position → predict Declining) performed *worse than random guessing* (12% accuracy vs. ~33% chance across three classes). This is a genuine, reportable negative finding: raw January search position alone is a poor predictor of which direction a page's clicks will move over the following two months in this dataset — position needs to be combined with volume and CTR signals to be useful, which is exactly what the model does and the heuristic doesn't.
+
+**Class-level pattern:** The model is more confident and accurate identifying Growing pages than Declining ones, and it is conservative (rather than aggressive) about calling a page Declining — it under-flags rather than over-flags, which shapes how the recommendation confidence threshold in Section 7 was set.
+
+## 7. Recommendation
+
+Using the Random Forest's predicted probabilities, all 483 test-set pages were ranked by decline-confidence (`proba_Declining`, descending) and mapped to an action:
+
+- **Refresh** (16 pages) — predicted Declining with ≥50% confidence. Top priority for content review.
+- **Monitor** (246 pages) — predicted Declining with <50% confidence, or predicted Stable. Revisit next window rather than act immediately.
+- **Protect** (221 pages) — predicted Growing. Recommendation is to leave alone; an unnecessary edit could disrupt something that is currently working.
+
+Each page also carries a **reason code** comparing its January signals against the typical (median) values for confirmed decliners in the training data — e.g., "position worse than typical decliner (5.8)" or "CTR below typical decliner (1.1%)." Where no single factor stands out, the code states this explicitly ("flagged on combined signal pattern, no single dominant factor") rather than forcing a misleading single-cause explanation.
+
+**How a FlyRank editor would use this tomorrow:** Start at the top of the Refresh list (16 pages) — this is a short, manageable queue for one review cycle. For each page, read the reason code, check the page briefly, and decide to update, rewrite, or leave as-is. Treat Monitor as a "check again next month" list, not an action list. Treat Protect as a do-not-touch list unless there is a strong external reason.
+
+**Confidence and limits, stated explicitly:** This is a directional, decision-support tool with macro F1 = 0.305 — a real but modest edge over baseline. It should narrow a large page list to a small, prioritized review queue; it should not be used to make unreviewed automatic changes to any single page, and it says nothing about *why* the ranking algorithm behaves the way it does — only that certain January signals are associated with subsequent click direction.
+
+Full ranked list: `work/outputs/priority_queue.csv`.
+
+## 8. Reproducibility
+
+**To re-run from a fresh clone:**
+1. Clone the repo: `git clone https://github.com/MuhammadAhmadIshtiaq/ml-internship-muhammadahmadishtiaq`
+2. Open `work/notebooks/capstone.ipynb` in Google Colab (badge link at the top of the notebook).
+3. Run all cells top to bottom (Runtime → Run all). When prompted, paste a valid Hugging Face **read** token for the gated `FlyRank/internship-warehouse` dataset (never hardcode the token in a cell).
+4. Outputs are written to `work/outputs/`: `priority_queue.csv` and four chart PNGs (`chart_baseline_vs_model.png`, `chart_label_distribution.png`, `chart_sensitivity.png`, `chart_confusion_matrix.png`).
+
+**Random seeds used:**
+- Train/test split (primary): `random_state=42`
+- Random Forest: `random_state=42`
+- Sensitivity re-splits: seeds `[0, 1, 42, 7, 99]`
+
+**Environment:** Google Colab default Python 3 runtime. Key packages: `duckdb`, `huggingface_hub`, `scikit-learn`, `pandas`, `numpy`, `matplotlib`, `seaborn` (installed via `%pip install` cells in the notebook — no separate `requirements.txt` was needed since Colab's base image covers the rest).
+
+**Sealed evaluation status:** The final panel month (June 2026 / `_sample`) was **not** used anywhere in this analysis — development and evaluation both use the Jan–March mid-panel window only. No sealed-month holdout claim is made in this report; if a future iteration evaluates against June, that would require a separate, clearly labeled cell and a committed metrics file, per the reproducibility standard above.
+
+## 9. Acknowledgments & data credit
+
+Built on the FlyRank ML Internship dataset — https://flyrank.ai
+
+---
+
+> **Claims checklist before submitting:** observed / measured / directional / decision-support
+> **Metrics vs. base rate:** report your task's base rate (majority-class %) next to any
+> precision@K or accuracy — a high score can just be a high base rate. AUC / lift over
+> baseline are the honest discrimination numbers.
+> language everywhere · no causal claims without an experiment or causal design · no
+> "predicted Google's algorithm" · no client-identifying details · numbers in this report
+> match a fresh re-run.

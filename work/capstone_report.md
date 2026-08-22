@@ -17,7 +17,7 @@ This project asks which content pages are most likely to be declining, growing, 
 
 **Decision supported:** Which content pages a strategist or SEO editor should prioritize for review and possible refresh, given limited time to review every page individually.
 
-**Unit of analysis:** A (client, content) pair — one row per unique content item per client, aggregated over a calendar month window.
+**Unit of analysis:** A (client, content) pair  one row per unique content item per client, aggregated over a calendar month window.
 
 **Output:** A ranked priority list of pages, each assigned a predicted class (Declining / Growing / Stable), a decline-confidence score, a recommended action (Refresh / Monitor / Protect), and a plain-language reason code.
 
@@ -25,18 +25,18 @@ This project asks which content pages are most likely to be declining, growing, 
 
 **Cost of a wrong call:** Missing a real decline means a page keeps losing visibility unnoticed until the next review cycle. Flagging a stable or growing page as declining wastes editor review time on a page that didn't need it. Missed declines are treated as the costlier error, so scoring is designed to favor not missing real decliners over avoiding false alarms.
 
-**Why data/ML helps here:** A simple threshold rule (e.g., "flag if clicks dropped more than 20%") is a reasonable starting point and is used here as the baseline. However, it can't weigh multiple signals — clicks, impressions, position, and CTR — together, and page behavior varies across content types and volume levels. A model earns its place only if it measurably beats this baseline on the same data and metric; that comparison is reported honestly in Section 5, including cases where the improvement is modest.
+**Why data/ML helps here:** A simple threshold rule (e.g., "flag if clicks dropped more than 20%") is a reasonable starting point and is used here as the baseline. However, it can't weigh multiple signals clicks, impressions, position, and CTR together, and page behavior varies across content types and volume levels. A model earns its place only if it measurably beats this baseline on the same data and metric; that comparison is reported honestly in Section 5, including cases where the improvement is modest.
 
 ## 2. Data safety
 
 **Data used:** FlyRank internship warehouse (Hugging Face, gated, build v20260703), specifically `fact_content_daily_performance` (grain: report_date × client_hash_id × content_hash_id, ~78.8M rows, partitioned by month) and `dim_clients` (104 rows, client-level access and history metadata).
 
-**Date windows:** Development used a mid-panel window — January 2026 as the "before" period, March 2026 as the "after" period — rather than the final panel month (June 2026, matching the `_sample` table), which was treated as sealed/held-out and not touched during model development or threshold tuning.
+**Date windows:** Development used a mid-panel window January 2026 as the "before" period, March 2026 as the "after" period rather than the final panel month (June 2026, matching the `_sample` table), which was treated as sealed/held-out and not touched during model development or threshold tuning.
 
 **Columns deliberately excluded:**
 - `trend_direction` and `trend_pct`-style precomputed fields were never used as features, since they are themselves derived from the same outcome being predicted (label-derived leakage risk).
 - Rows before each client's GA4 data-start date were excluded from any GA4-dependent calculation, since GA4 columns are zero-filled (not genuinely zero) before that date.
-- Pages with fewer than 10 January clicks were excluded entirely — with such small denominators, percentage change is dominated by noise (e.g., 1→3 clicks reads as "+200%" despite reflecting no meaningful signal). This dropped the eligible set from 41,101 to 8,557 (client, content) pairs.
+- Pages with fewer than 10 January clicks were excluded entirely with such small denominators, percentage change is dominated by noise (e.g., 1→3 clicks reads as "+200%" despite reflecting no meaningful signal). This dropped the eligible set from 41,101 to 8,557 (client, content) pairs.
 
 **Leakage risks considered:**
 - The label (`pct_change_clicks`, and the resulting Declining/Growing/Stable bucket) is computed using March data. The predictive model was deliberately restricted to January-only features (`jan_clicks`, `jan_impressions`, `jan_avg_position`, `jan_ctr`) so it never sees the outcome window it is predicting.
@@ -52,7 +52,7 @@ Two baselines were built, both using only January-window information (no March d
 **Naive baseline:** Always predicts the majority class (Declining, 38.1% of the labeled set). This is the floor any real method must beat.
 - Accuracy: 0.663 (misleading — driven entirely by a class-imbalanced test set)
 - Macro F1: 0.266
-- Per-class: 0% precision/recall on Growing and Stable — it never correctly identifies these classes.
+- Per-class: 0% precision/recall on Growing and Stable it never correctly identifies these classes.
 
 **Heuristic baseline:** A simple rule using only `jan_avg_position` — position worse than 20 → predict Declining; position better than 8 → predict Growing; otherwise → predict Stable. No model fitting.
 - Accuracy: 0.120
@@ -68,14 +68,14 @@ Both baselines are evaluated on the exact same client-grouped test split used fo
 **Why it fits the lane:** Refresh/Content Opportunity Scoring calls for a ranked action engine with reason codes — Random Forest's `predict_proba` output supports ranking by decline-confidence, and its feature importances support the reason-code / interpretation layer (Section 6).
 
 **Feature list (January-window only):**
-- `jan_clicks` — total January clicks
-- `jan_impressions` — total January impressions
-- `jan_avg_position` — average January search position
-- `jan_ctr` — January click-through rate (`jan_clicks / jan_impressions`)
+- `jan_clicks`  total January clicks
+- `jan_impressions`  total January impressions
+- `jan_avg_position` average January search position
+- `jan_ctr` January click-through rate (`jan_clicks / jan_impressions`)
 
 **Deliberately excluded:** March-window values of any kind (leakage), `trend_direction`/`trend_pct` (label-derived), `client_hash_id`/`content_hash_id` (used for grouping only, not as features).
 
-**Target/proxy definition (one sentence):** The label is a three-class bucket — Declining (≤ -20%), Growing (≥ +20%), or Stable (between) — based on the percentage change in total clicks from January 2026 to March 2026, restricted to pages with at least 10 January clicks.
+**Target/proxy definition (one sentence):** The label is a three-class bucket — Declining (≤ -20%), Growing (≥ +20%), or Stable (between) based on the percentage change in total clicks from January 2026 to March 2026, restricted to pages with at least 10 January clicks.
 
 ## 5. Evaluation
 
@@ -106,9 +106,9 @@ Accuracy is misleading here: the naive baseline's 66.3% accuracy comes entirely 
 | jan_impressions | 0.219 |
 | jan_avg_position | 0.214 |
 
-No single feature dominates — the four importances sit within a fairly narrow band (21–32%), meaning the model relies on a *combined* pattern across click volume, CTR, impressions, and position rather than any one dominant signal. This is consistent with what the reason codes show in practice (Section 7): many flagged pages don't trip a single obvious threshold, and are instead flagged on the combined signal pattern.
+No single feature dominates the four importances sit within a fairly narrow band (21–32%), meaning the model relies on a *combined* pattern across click volume, CTR, impressions, and position rather than any one dominant signal. This is consistent with what the reason codes show in practice (Section 7): many flagged pages don't trip a single obvious threshold, and are instead flagged on the combined signal pattern.
 
-**Surprise / negative result:** The position-based heuristic (worse position → predict Declining) performed *worse than random guessing* (12% accuracy vs. ~33% chance across three classes). This is a genuine, reportable negative finding: raw January search position alone is a poor predictor of which direction a page's clicks will move over the following two months in this dataset — position needs to be combined with volume and CTR signals to be useful, which is exactly what the model does and the heuristic doesn't.
+**Surprise / negative result:** The position-based heuristic (worse position → predict Declining) performed *worse than random guessing* (12% accuracy vs. ~33% chance across three classes). This is a genuine, reportable negative finding: raw January search position alone is a poor predictor of which direction a page's clicks will move over the following two months in this dataset position needs to be combined with volume and CTR signals to be useful, which is exactly what the model does and the heuristic doesn't.
 
 **Class-level pattern:** The model is more confident and accurate identifying Growing pages than Declining ones, and it is conservative (rather than aggressive) about calling a page Declining — it under-flags rather than over-flags, which shapes how the recommendation confidence threshold in Section 7 was set.
 
@@ -116,9 +116,9 @@ No single feature dominates — the four importances sit within a fairly narrow 
 
 Using the Random Forest's predicted probabilities, all 483 test-set pages were ranked by decline-confidence (`proba_Declining`, descending) and mapped to an action:
 
-- **Refresh** (16 pages) — predicted Declining with ≥50% confidence. Top priority for content review.
-- **Monitor** (246 pages) — predicted Declining with <50% confidence, or predicted Stable. Revisit next window rather than act immediately.
-- **Protect** (221 pages) — predicted Growing. Recommendation is to leave alone; an unnecessary edit could disrupt something that is currently working.
+- **Refresh** (16 pages)  predicted Declining with ≥50% confidence. Top priority for content review.
+- **Monitor** (246 pages)  predicted Declining with <50% confidence, or predicted Stable. Revisit next window rather than act immediately.
+- **Protect** (221 pages)  predicted Growing. Recommendation is to leave alone; an unnecessary edit could disrupt something that is currently working.
 
 Each page also carries a **reason code** comparing its January signals against the typical (median) values for confirmed decliners in the training data — e.g., "position worse than typical decliner (5.8)" or "CTR below typical decliner (1.1%)." Where no single factor stands out, the code states this explicitly ("flagged on combined signal pattern, no single dominant factor") rather than forcing a misleading single-cause explanation.
 
@@ -141,13 +141,13 @@ Full ranked list: `work/outputs/priority_queue.csv`.
 - Random Forest: `random_state=42`
 - Sensitivity re-splits: seeds `[0, 1, 42, 7, 99]`
 
-**Environment:** Google Colab default Python 3 runtime. Key packages: `duckdb`, `huggingface_hub`, `scikit-learn`, `pandas`, `numpy`, `matplotlib`, `seaborn` (installed via `%pip install` cells in the notebook — no separate `requirements.txt` was needed since Colab's base image covers the rest).
+**Environment:** Google Colab default Python 3 runtime. Key packages: `duckdb`, `huggingface_hub`, `scikit-learn`, `pandas`, `numpy`, `matplotlib`, `seaborn` (installed via `%pip install` cells in the notebook no separate `requirements.txt` was needed since Colab's base image covers the rest).
 
 **Sealed evaluation status:** The final panel month (June 2026 / `_sample`) was **not** used anywhere in this analysis — development and evaluation both use the Jan–March mid-panel window only. No sealed-month holdout claim is made in this report; if a future iteration evaluates against June, that would require a separate, clearly labeled cell and a committed metrics file, per the reproducibility standard above.
 
 ## 9. Acknowledgments & data credit
 
-Built on the FlyRank ML Internship dataset — https://flyrank.ai
+Built on the FlyRank ML Internship dataset https://flyrank.ai
 
 ---
 

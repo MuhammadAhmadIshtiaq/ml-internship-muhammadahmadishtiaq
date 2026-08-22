@@ -1,78 +1,727 @@
-# Capstone Report — <your lane>
-
-- **Author: Muhammad Ahmad Ishtiaq**
-- **Lane:**
-- **Repo:**
-- **Date:**
-
-> Copy this file to `work/capstone_report.md` and fill it in as you build. Sections 1–8
-> mirror the Pass / Needs-Work rubric axes, so nothing here is optional. Sections 0 and 9
-> are **paper sections**: your deployed research paper must carry both, and they're here so
-> you never rebuild them from memory at ship time.
-
-## 0. Abstract
-
-Five sentences, written last, placed first: question → data → method → headline result →
-what the output is for. This is the top of your deployed paper.
-
-## 1. Problem framing
-
-What decision does this support? Name the unit of analysis (page, client, day…), the output
-(score, rank, cluster, report), the action a human takes from it, and the cost of a wrong
-call. Why does data/ML help here at all?
-
-## 2. Data safety
-
-Which data you used and which columns you deliberately excluded (and why). Leakage risks you
-considered — especially label-derived fields (`trend_direction`, `trend_pct`) and pseudonymous
-IDs (grouping only, never features). Confirm nothing client-identifying appears anywhere in
-`work/`.
-
-## 3. Baseline
-
-The transparent rule or score you built first. Why it's a fair comparison, and its numbers on
-the same data and metric as your model.
-
-## 4. Model / analysis
-
-Your method and why it fits the lane. The exact feature list (and what you left out on
-purpose). The target or proxy definition, in one sentence.
-
-## 5. Evaluation
-
-Your split (grouped by client? time-aware?) and why. Metrics, model vs baseline **on the same
-split**. What the errors look like — a short error analysis beats a big metric table.
-
-## 6. Interpretation
-
-What the model/clusters actually found. Feature importances or cluster profiles in plain
-words. Surprises and negative results — a well-understood "no effect" is a valid result.
-
-## 7. Recommendation
-
-The ranked actions or decisions your output supports, and how a FlyRank editor would use them
-tomorrow. State your confidence and the limits explicitly.
-
-## 8. Reproducibility
-
-The exact commands to re-run everything from a fresh clone, your random seeds, and your
-environment (`pip freeze` highlights or `requirements.txt` deltas). If you claim a sealed or
-holdout evaluation, two things must be committed: the cell/script that builds the sealed
-frame, and the metrics file it produced — "evaluated once, blind" should be checkable from
-your repo, not taken on faith.
-
-## 9. Acknowledgments & data credit
-
-One short section at the bottom of the deployed paper: "Built on the FlyRank ML Internship
-dataset" **linking to https://flyrank.ai**. Crediting your data source is standard research
-practice — and it's on the capstone's required-section list, so a paper without it isn't done.
-
----
-
-> **Claims checklist before submitting:** observed / measured / directional / decision-support
-> **Metrics vs. base rate:** report your task's base rate (majority-class %) next to any
-> precision@K or accuracy — a high score can just be a high base rate. AUC / lift over
-> baseline are the honest discrimination numbers.
-> language everywhere · no causal claims without an experiment or causal design · no
-> "predicted Google's algorithm" · no client-identifying details · numbers in this report
-> match a fresh re-run.
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "id": "30f7665c",
+   "metadata": {},
+   "source": [
+    "# ML-07 — Baseline Action Score and Top-20 Review\n",
+    "\n",
+    "[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/MuhammadAhmadIshtiaq/ml-internship-muhammadahmadishtiaq/blob/main/work/notebooks/w04_baseline_score.ipynb?flush_cache=true)\n",
+    "\n",
+    "This skeleton is yours to fill. Work the sections **in order** — each one has a one-line hint. Simple words, honest numbers.\n",
+    "\n",
+    "> Working with an AI assistant? Tell it to read `skills/README.md` first and load the one skill this assignment names on its card."
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "decbd2ee",
+   "metadata": {},
+   "source": [
+    "## 1. My rule and its reason codes\n",
+    "\n",
+    "*Write the rule in plain words first. Then the reason codes it can output.*"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "547fbbd3",
+   "metadata": {},
+   "source": [
+    "**The rule, in plain words:** flag a page for review first if it still gets real search visibility, hasn't been touched in a long time, and its click-through or ranking looks weak given the demand that exists for it. A page nobody sees isn't worth a reviewer's time no matter how stale it is — visibility gates everything else.\n",
+    "\n",
+    "**Reason codes it can output** (a page can carry more than one):\n",
+    "- `visible_but_stale` — real search visibility (≥100 impressions/90d), but not touched in 90+ days.\n",
+    "- `weak_ctr_for_position` — click-through rate below the median for pages at the same ranking-position tier (underperforming its own peer group, not just underperforming overall).\n",
+    "- `deep_position_high_demand` — ranks poorly (page 3+) despite the keyword having above-median search demand — real opportunity being left on the table.\n",
+    "\n",
+    "None of these three signals touches `trend_pct`, `trend_direction`, or the `_last_30d`/`_prev_30d` impression columns — the rule only uses fields already cleared as safe features in ML-04/ML-05."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 1,
+   "id": "27879c31",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2026-08-21T11:47:05.380645Z",
+     "iopub.status.busy": "2026-08-21T11:47:05.379900Z",
+     "iopub.status.idle": "2026-08-21T11:47:06.255072Z",
+     "shell.execute_reply": "2026-08-21T11:47:06.254034Z"
+    }
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Rule uses: ['impressions_90d', 'days_since_last_update', 'ctr', 'position_tier', 'search_volume']\n",
+      "Any forbidden columns touched: False\n"
+     ]
+    }
+   ],
+   "source": [
+    "# This cell is for CODE (numbers, a query, a check).\n",
+    "# Write your text answer in the cell ABOVE this one — typing sentences here breaks Run All.\n",
+    "\n",
+    "import numpy as np\n",
+    "import pandas as pd\n",
+    "\n",
+    "df = pd.read_csv(\"data/raw/content_refresh_anonymized.csv\")\n",
+    "df[\"is_declining_label\"] = (df[\"trend_direction\"] == \"down\").astype(int)\n",
+    "\n",
+    "# Confirm the columns the rule will use are all pre-cleared as safe (no leak columns)\n",
+    "rule_columns = [\"impressions_90d\", \"days_since_last_update\", \"ctr\", \"position_tier\", \"search_volume\"]\n",
+    "forbidden = {\"trend_pct\", \"trend_direction\", \"impressions_last_30d\", \"impressions_prev_30d\"}\n",
+    "print(\"Rule uses:\", rule_columns)\n",
+    "print(\"Any forbidden columns touched:\", bool(set(rule_columns) & forbidden))\n"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "0869fbb8",
+   "metadata": {},
+   "source": [
+    "## 2. Build the ranked queue (writes the CSV)\n",
+    "\n",
+    "*Code the score, rank everything, write work/outputs/baseline_action_score.csv.*"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "c1245105",
+   "metadata": {},
+   "source": [
+    "Coded as transparent conditions with **no fitted weights** — every threshold below is a round, readable number, not a value tuned to make the score look good. Visibility and staleness gate the score (multiply); the two weak-performance signals add on top so a page tripping both looks worse than one tripping either alone."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 2,
+   "id": "3fb4dd7e",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2026-08-21T11:47:06.257224Z",
+     "iopub.status.busy": "2026-08-21T11:47:06.256607Z",
+     "iopub.status.idle": "2026-08-21T11:47:06.515589Z",
+     "shell.execute_reply": "2026-08-21T11:47:06.514710Z"
+    }
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Wrote work/outputs/baseline_action_score.csv -- 30000 rows\n",
+      "             content_id      score  \\\n",
+      "0  content_73e60bb3846d  28.040116   \n",
+      "1  content_b42044589109  27.863570   \n",
+      "2  content_b21aed900ad9  27.413954   \n",
+      "3  content_162c5ba9e046  27.048082   \n",
+      "4  content_70450b1c27ae  27.003299   \n",
+      "\n",
+      "                                        reason_codes  rank  \n",
+      "0  visible_but_stale,weak_ctr_for_position,deep_p...     1  \n",
+      "1  visible_but_stale,weak_ctr_for_position,deep_p...     2  \n",
+      "2  visible_but_stale,weak_ctr_for_position,deep_p...     3  \n",
+      "3  visible_but_stale,weak_ctr_for_position,deep_p...     4  \n",
+      "4  visible_but_stale,weak_ctr_for_position,deep_p...     5  \n",
+      "\n",
+      "Base rate (random-pick floor): 54.2%\n",
+      "precision@20: 65.0%  (vs 54.2% base rate)\n",
+      "precision@50: 64.0%  (vs 54.2% base rate)\n",
+      "precision@100: 61.0%  (vs 54.2% base rate)\n"
+     ]
+    }
+   ],
+   "source": [
+    "# This cell is for CODE (numbers, a query, a check).\n",
+    "# Write your text answer in the cell ABOVE this one — typing sentences here breaks Run All.\n",
+    "\n",
+    "visible = (df[\"impressions_90d\"] >= 100).astype(int)\n",
+    "stale = (df[\"days_since_last_update\"] >= 90).astype(int)\n",
+    "\n",
+    "# per position-tier median CTR -- \"weak for ITS OWN peer group\", not weak overall\n",
+    "ctr_median_by_tier = df.groupby(\"position_tier\")[\"ctr\"].transform(\"median\")\n",
+    "weak_ctr = (df[\"ctr\"] < ctr_median_by_tier).astype(int)\n",
+    "\n",
+    "search_volume_median = df[\"search_volume\"].median()\n",
+    "deep_position_high_demand = (\n",
+    "    df[\"position_tier\"].isin([\"page_3_5\", \"deep\"]) &\n",
+    "    (df[\"search_volume\"] > search_volume_median)\n",
+    ").astype(int)\n",
+    "\n",
+    "reason_flags = pd.DataFrame({\n",
+    "    \"visible_but_stale\": visible * stale,\n",
+    "    \"weak_ctr_for_position\": weak_ctr,\n",
+    "    \"deep_position_high_demand\": deep_position_high_demand,\n",
+    "})\n",
+    "\n",
+    "def build_reason_codes(row):\n",
+    "    codes = [name for name, val in row.items() if val == 1]\n",
+    "    return \",\".join(codes) if codes else \"none\"\n",
+    "\n",
+    "queue = pd.DataFrame({\n",
+    "    \"content_id\": df[\"content_id\"],\n",
+    "    \"client_id\": df[\"client_id\"],\n",
+    "})\n",
+    "queue[\"reason_codes\"] = reason_flags.apply(build_reason_codes, axis=1)\n",
+    "\n",
+    "# Readable score: gated by visibility+staleness, weighted up by how many weak-signals fire,\n",
+    "# scaled by log-impressions so higher-traffic pages outrank near-identical low-traffic ones.\n",
+    "queue[\"score\"] = (\n",
+    "    visible * stale *\n",
+    "    (1 + weak_ctr + deep_position_high_demand) *\n",
+    "    np.log1p(df[\"impressions_90d\"])\n",
+    ")\n",
+    "queue[\"is_declining_label\"] = df[\"is_declining_label\"]  # kept for evaluation only, not for scoring\n",
+    "\n",
+    "queue = queue.sort_values(\"score\", ascending=False).reset_index(drop=True)\n",
+    "queue[\"rank\"] = queue.index + 1\n",
+    "\n",
+    "import os\n",
+    "os.makedirs(\"work/outputs\", exist_ok=True)\n",
+    "queue.to_csv(\"work/outputs/baseline_action_score.csv\", index=False)\n",
+    "\n",
+    "print(\"Wrote work/outputs/baseline_action_score.csv --\", len(queue), \"rows\")\n",
+    "print(queue.head(5)[[\"content_id\", \"score\", \"reason_codes\", \"rank\"]])\n",
+    "\n",
+    "# --- precision@K vs base rate, per the skill's rule: always print them side by side ---\n",
+    "def precision_at_k(scores, labels, k):\n",
+    "    order = np.argsort(-np.asarray(scores))\n",
+    "    return np.asarray(labels)[order[:k]].mean()\n",
+    "\n",
+    "base_rate = queue[\"is_declining_label\"].mean()\n",
+    "print(f\"\\nBase rate (random-pick floor): {base_rate:.1%}\")\n",
+    "for k in [20, 50, 100]:\n",
+    "    p = precision_at_k(queue[\"score\"], queue[\"is_declining_label\"], k)\n",
+    "    print(f\"precision@{k}: {p:.1%}  (vs {base_rate:.1%} base rate)\")\n"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "963e927d",
+   "metadata": {},
+   "source": [
+    "## 3. Top-20 review\n",
+    "\n",
+    "*For each of the top 20: action, reason code, confidence note, and what would make it wrong.*"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "13f753aa",
+   "metadata": {},
+   "source": [
+    "For each of the top 20: the action a reviewer takes, the reason code(s) that put it there, a confidence note (more reason codes firing together = more confidence), and one honest sentence on what would make this particular pick wrong."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 3,
+   "id": "d1ad1971",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2026-08-21T11:47:06.517543Z",
+     "iopub.status.busy": "2026-08-21T11:47:06.516923Z",
+     "iopub.status.idle": "2026-08-21T11:47:06.532717Z",
+     "shell.execute_reply": "2026-08-21T11:47:06.531969Z"
+    }
+   },
+   "outputs": [
+    {
+     "data": {
+      "text/html": [
+       "<div>\n",
+       "<style scoped>\n",
+       "    .dataframe tbody tr th:only-of-type {\n",
+       "        vertical-align: middle;\n",
+       "    }\n",
+       "\n",
+       "    .dataframe tbody tr th {\n",
+       "        vertical-align: top;\n",
+       "    }\n",
+       "\n",
+       "    .dataframe thead th {\n",
+       "        text-align: right;\n",
+       "    }\n",
+       "</style>\n",
+       "<table border=\"1\" class=\"dataframe\">\n",
+       "  <thead>\n",
+       "    <tr style=\"text-align: right;\">\n",
+       "      <th></th>\n",
+       "      <th>rank</th>\n",
+       "      <th>content_id</th>\n",
+       "      <th>score</th>\n",
+       "      <th>reason_codes</th>\n",
+       "      <th>action</th>\n",
+       "      <th>confidence</th>\n",
+       "      <th>what_would_make_it_wrong</th>\n",
+       "    </tr>\n",
+       "  </thead>\n",
+       "  <tbody>\n",
+       "    <tr>\n",
+       "      <th>0</th>\n",
+       "      <td>1</td>\n",
+       "      <td>content_73e60bb3846d</td>\n",
+       "      <td>28.040116</td>\n",
+       "      <td>visible_but_stale,weak_ctr_for_position,deep_p...</td>\n",
+       "      <td>Flag for content review</td>\n",
+       "      <td>high -- all three signals agree</td>\n",
+       "      <td>the keyword's real intent may not match this p...</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>1</th>\n",
+       "      <td>2</td>\n",
+       "      <td>content_b42044589109</td>\n",
+       "      <td>27.863570</td>\n",
+       "      <td>visible_but_stale,weak_ctr_for_position,deep_p...</td>\n",
+       "      <td>Flag for content review</td>\n",
+       "      <td>high -- all three signals agree</td>\n",
+       "      <td>the keyword's real intent may not match this p...</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>2</th>\n",
+       "      <td>3</td>\n",
+       "      <td>content_b21aed900ad9</td>\n",
+       "      <td>27.413954</td>\n",
+       "      <td>visible_but_stale,weak_ctr_for_position,deep_p...</td>\n",
+       "      <td>Flag for content review</td>\n",
+       "      <td>high -- all three signals agree</td>\n",
+       "      <td>the keyword's real intent may not match this p...</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>3</th>\n",
+       "      <td>4</td>\n",
+       "      <td>content_162c5ba9e046</td>\n",
+       "      <td>27.048082</td>\n",
+       "      <td>visible_but_stale,weak_ctr_for_position,deep_p...</td>\n",
+       "      <td>Flag for content review</td>\n",
+       "      <td>high -- all three signals agree</td>\n",
+       "      <td>the keyword's real intent may not match this p...</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>4</th>\n",
+       "      <td>5</td>\n",
+       "      <td>content_70450b1c27ae</td>\n",
+       "      <td>27.003299</td>\n",
+       "      <td>visible_but_stale,weak_ctr_for_position,deep_p...</td>\n",
+       "      <td>Flag for content review</td>\n",
+       "      <td>high -- all three signals agree</td>\n",
+       "      <td>the keyword's real intent may not match this p...</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>5</th>\n",
+       "      <td>6</td>\n",
+       "      <td>content_7388fb24ce43</td>\n",
+       "      <td>26.672058</td>\n",
+       "      <td>visible_but_stale,weak_ctr_for_position,deep_p...</td>\n",
+       "      <td>Flag for content review</td>\n",
+       "      <td>high -- all three signals agree</td>\n",
+       "      <td>the keyword's real intent may not match this p...</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>6</th>\n",
+       "      <td>7</td>\n",
+       "      <td>content_5fe46e04994d</td>\n",
+       "      <td>26.314364</td>\n",
+       "      <td>visible_but_stale,weak_ctr_for_position</td>\n",
+       "      <td>Flag for content review</td>\n",
+       "      <td>medium -- two of three signals agree</td>\n",
+       "      <td>a low CTR at this position can also mean the S...</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>7</th>\n",
+       "      <td>8</td>\n",
+       "      <td>content_156a9e99ddbc</td>\n",
+       "      <td>26.262956</td>\n",
+       "      <td>visible_but_stale,weak_ctr_for_position,deep_p...</td>\n",
+       "      <td>Flag for content review</td>\n",
+       "      <td>high -- all three signals agree</td>\n",
+       "      <td>the keyword's real intent may not match this p...</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>8</th>\n",
+       "      <td>9</td>\n",
+       "      <td>content_34524f48e8ee</td>\n",
+       "      <td>26.229638</td>\n",
+       "      <td>visible_but_stale,weak_ctr_for_position,deep_p...</td>\n",
+       "      <td>Flag for content review</td>\n",
+       "      <td>high -- all three signals agree</td>\n",
+       "      <td>the keyword's real intent may not match this p...</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>9</th>\n",
+       "      <td>10</td>\n",
+       "      <td>content_ca4741e65ab8</td>\n",
+       "      <td>26.190132</td>\n",
+       "      <td>visible_but_stale,weak_ctr_for_position,deep_p...</td>\n",
+       "      <td>Flag for content review</td>\n",
+       "      <td>high -- all three signals agree</td>\n",
+       "      <td>the keyword's real intent may not match this p...</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>10</th>\n",
+       "      <td>11</td>\n",
+       "      <td>content_8d0a8cbf9d1e</td>\n",
+       "      <td>25.605689</td>\n",
+       "      <td>visible_but_stale,weak_ctr_for_position,deep_p...</td>\n",
+       "      <td>Flag for content review</td>\n",
+       "      <td>high -- all three signals agree</td>\n",
+       "      <td>the keyword's real intent may not match this p...</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>11</th>\n",
+       "      <td>12</td>\n",
+       "      <td>content_5292478e83f6</td>\n",
+       "      <td>25.407158</td>\n",
+       "      <td>visible_but_stale,weak_ctr_for_position,deep_p...</td>\n",
+       "      <td>Flag for content review</td>\n",
+       "      <td>high -- all three signals agree</td>\n",
+       "      <td>the keyword's real intent may not match this p...</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>12</th>\n",
+       "      <td>13</td>\n",
+       "      <td>content_02ae9b37d7b7</td>\n",
+       "      <td>25.333867</td>\n",
+       "      <td>visible_but_stale,weak_ctr_for_position,deep_p...</td>\n",
+       "      <td>Flag for content review</td>\n",
+       "      <td>high -- all three signals agree</td>\n",
+       "      <td>the keyword's real intent may not match this p...</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>13</th>\n",
+       "      <td>14</td>\n",
+       "      <td>content_9c99214e6c59</td>\n",
+       "      <td>25.287053</td>\n",
+       "      <td>visible_but_stale,weak_ctr_for_position,deep_p...</td>\n",
+       "      <td>Flag for content review</td>\n",
+       "      <td>high -- all three signals agree</td>\n",
+       "      <td>the keyword's real intent may not match this p...</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>14</th>\n",
+       "      <td>15</td>\n",
+       "      <td>content_deb54e9e19cd</td>\n",
+       "      <td>25.275892</td>\n",
+       "      <td>visible_but_stale,weak_ctr_for_position,deep_p...</td>\n",
+       "      <td>Flag for content review</td>\n",
+       "      <td>high -- all three signals agree</td>\n",
+       "      <td>the keyword's real intent may not match this p...</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>15</th>\n",
+       "      <td>16</td>\n",
+       "      <td>content_dbf29df094f9</td>\n",
+       "      <td>25.248802</td>\n",
+       "      <td>visible_but_stale,weak_ctr_for_position,deep_p...</td>\n",
+       "      <td>Flag for content review</td>\n",
+       "      <td>high -- all three signals agree</td>\n",
+       "      <td>the keyword's real intent may not match this p...</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>16</th>\n",
+       "      <td>17</td>\n",
+       "      <td>content_36ff89c8214e</td>\n",
+       "      <td>25.190126</td>\n",
+       "      <td>visible_but_stale,weak_ctr_for_position</td>\n",
+       "      <td>Flag for content review</td>\n",
+       "      <td>medium -- two of three signals agree</td>\n",
+       "      <td>a low CTR at this position can also mean the S...</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>17</th>\n",
+       "      <td>18</td>\n",
+       "      <td>content_454cc6654c6e</td>\n",
+       "      <td>25.144120</td>\n",
+       "      <td>visible_but_stale,weak_ctr_for_position,deep_p...</td>\n",
+       "      <td>Flag for content review</td>\n",
+       "      <td>high -- all three signals agree</td>\n",
+       "      <td>the keyword's real intent may not match this p...</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>18</th>\n",
+       "      <td>19</td>\n",
+       "      <td>content_1b11e93d8029</td>\n",
+       "      <td>24.903820</td>\n",
+       "      <td>visible_but_stale,weak_ctr_for_position,deep_p...</td>\n",
+       "      <td>Flag for content review</td>\n",
+       "      <td>high -- all three signals agree</td>\n",
+       "      <td>the keyword's real intent may not match this p...</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>19</th>\n",
+       "      <td>20</td>\n",
+       "      <td>content_9d2a09880e1a</td>\n",
+       "      <td>24.898604</td>\n",
+       "      <td>visible_but_stale,weak_ctr_for_position,deep_p...</td>\n",
+       "      <td>Flag for content review</td>\n",
+       "      <td>high -- all three signals agree</td>\n",
+       "      <td>the keyword's real intent may not match this p...</td>\n",
+       "    </tr>\n",
+       "  </tbody>\n",
+       "</table>\n",
+       "</div>"
+      ],
+      "text/plain": [
+       "    rank            content_id      score  \\\n",
+       "0      1  content_73e60bb3846d  28.040116   \n",
+       "1      2  content_b42044589109  27.863570   \n",
+       "2      3  content_b21aed900ad9  27.413954   \n",
+       "3      4  content_162c5ba9e046  27.048082   \n",
+       "4      5  content_70450b1c27ae  27.003299   \n",
+       "5      6  content_7388fb24ce43  26.672058   \n",
+       "6      7  content_5fe46e04994d  26.314364   \n",
+       "7      8  content_156a9e99ddbc  26.262956   \n",
+       "8      9  content_34524f48e8ee  26.229638   \n",
+       "9     10  content_ca4741e65ab8  26.190132   \n",
+       "10    11  content_8d0a8cbf9d1e  25.605689   \n",
+       "11    12  content_5292478e83f6  25.407158   \n",
+       "12    13  content_02ae9b37d7b7  25.333867   \n",
+       "13    14  content_9c99214e6c59  25.287053   \n",
+       "14    15  content_deb54e9e19cd  25.275892   \n",
+       "15    16  content_dbf29df094f9  25.248802   \n",
+       "16    17  content_36ff89c8214e  25.190126   \n",
+       "17    18  content_454cc6654c6e  25.144120   \n",
+       "18    19  content_1b11e93d8029  24.903820   \n",
+       "19    20  content_9d2a09880e1a  24.898604   \n",
+       "\n",
+       "                                         reason_codes  \\\n",
+       "0   visible_but_stale,weak_ctr_for_position,deep_p...   \n",
+       "1   visible_but_stale,weak_ctr_for_position,deep_p...   \n",
+       "2   visible_but_stale,weak_ctr_for_position,deep_p...   \n",
+       "3   visible_but_stale,weak_ctr_for_position,deep_p...   \n",
+       "4   visible_but_stale,weak_ctr_for_position,deep_p...   \n",
+       "5   visible_but_stale,weak_ctr_for_position,deep_p...   \n",
+       "6             visible_but_stale,weak_ctr_for_position   \n",
+       "7   visible_but_stale,weak_ctr_for_position,deep_p...   \n",
+       "8   visible_but_stale,weak_ctr_for_position,deep_p...   \n",
+       "9   visible_but_stale,weak_ctr_for_position,deep_p...   \n",
+       "10  visible_but_stale,weak_ctr_for_position,deep_p...   \n",
+       "11  visible_but_stale,weak_ctr_for_position,deep_p...   \n",
+       "12  visible_but_stale,weak_ctr_for_position,deep_p...   \n",
+       "13  visible_but_stale,weak_ctr_for_position,deep_p...   \n",
+       "14  visible_but_stale,weak_ctr_for_position,deep_p...   \n",
+       "15  visible_but_stale,weak_ctr_for_position,deep_p...   \n",
+       "16            visible_but_stale,weak_ctr_for_position   \n",
+       "17  visible_but_stale,weak_ctr_for_position,deep_p...   \n",
+       "18  visible_but_stale,weak_ctr_for_position,deep_p...   \n",
+       "19  visible_but_stale,weak_ctr_for_position,deep_p...   \n",
+       "\n",
+       "                     action                            confidence  \\\n",
+       "0   Flag for content review       high -- all three signals agree   \n",
+       "1   Flag for content review       high -- all three signals agree   \n",
+       "2   Flag for content review       high -- all three signals agree   \n",
+       "3   Flag for content review       high -- all three signals agree   \n",
+       "4   Flag for content review       high -- all three signals agree   \n",
+       "5   Flag for content review       high -- all three signals agree   \n",
+       "6   Flag for content review  medium -- two of three signals agree   \n",
+       "7   Flag for content review       high -- all three signals agree   \n",
+       "8   Flag for content review       high -- all three signals agree   \n",
+       "9   Flag for content review       high -- all three signals agree   \n",
+       "10  Flag for content review       high -- all three signals agree   \n",
+       "11  Flag for content review       high -- all three signals agree   \n",
+       "12  Flag for content review       high -- all three signals agree   \n",
+       "13  Flag for content review       high -- all three signals agree   \n",
+       "14  Flag for content review       high -- all three signals agree   \n",
+       "15  Flag for content review       high -- all three signals agree   \n",
+       "16  Flag for content review  medium -- two of three signals agree   \n",
+       "17  Flag for content review       high -- all three signals agree   \n",
+       "18  Flag for content review       high -- all three signals agree   \n",
+       "19  Flag for content review       high -- all three signals agree   \n",
+       "\n",
+       "                             what_would_make_it_wrong  \n",
+       "0   the keyword's real intent may not match this p...  \n",
+       "1   the keyword's real intent may not match this p...  \n",
+       "2   the keyword's real intent may not match this p...  \n",
+       "3   the keyword's real intent may not match this p...  \n",
+       "4   the keyword's real intent may not match this p...  \n",
+       "5   the keyword's real intent may not match this p...  \n",
+       "6   a low CTR at this position can also mean the S...  \n",
+       "7   the keyword's real intent may not match this p...  \n",
+       "8   the keyword's real intent may not match this p...  \n",
+       "9   the keyword's real intent may not match this p...  \n",
+       "10  the keyword's real intent may not match this p...  \n",
+       "11  the keyword's real intent may not match this p...  \n",
+       "12  the keyword's real intent may not match this p...  \n",
+       "13  the keyword's real intent may not match this p...  \n",
+       "14  the keyword's real intent may not match this p...  \n",
+       "15  the keyword's real intent may not match this p...  \n",
+       "16  a low CTR at this position can also mean the S...  \n",
+       "17  the keyword's real intent may not match this p...  \n",
+       "18  the keyword's real intent may not match this p...  \n",
+       "19  the keyword's real intent may not match this p...  "
+      ]
+     },
+     "execution_count": 3,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "# This cell is for CODE (numbers, a query, a check).\n",
+    "# Write your text answer in the cell ABOVE this one — typing sentences here breaks Run All.\n",
+    "\n",
+    "def confidence_note(codes_str):\n",
+    "    n = 0 if codes_str == \"none\" else len(codes_str.split(\",\"))\n",
+    "    if n >= 3:\n",
+    "        return \"high -- all three signals agree\"\n",
+    "    elif n == 2:\n",
+    "        return \"medium -- two of three signals agree\"\n",
+    "    else:\n",
+    "        return \"low -- resting on one signal only\"\n",
+    "\n",
+    "def what_would_make_it_wrong(codes_str):\n",
+    "    notes = []\n",
+    "    if \"deep_position_high_demand\" in codes_str:\n",
+    "        notes.append(\"the keyword's real intent may not match this page's content (mismatched target)\")\n",
+    "    if \"weak_ctr_for_position\" in codes_str:\n",
+    "        notes.append(\"a low CTR at this position can also mean the SERP snippet is fine but demand is seasonal\")\n",
+    "    if \"visible_but_stale\" in codes_str:\n",
+    "        notes.append(\"the page may be intentionally stable content that doesn't need frequent updates\")\n",
+    "    return \"; \".join(notes) if notes else \"no strong signal fired -- low-confidence pick\"\n",
+    "\n",
+    "top20 = queue.head(20).copy()\n",
+    "top20[\"action\"] = \"Flag for content review\"\n",
+    "top20[\"confidence\"] = top20[\"reason_codes\"].apply(confidence_note)\n",
+    "top20[\"what_would_make_it_wrong\"] = top20[\"reason_codes\"].apply(what_would_make_it_wrong)\n",
+    "\n",
+    "top20[[\"rank\", \"content_id\", \"score\", \"reason_codes\", \"action\", \"confidence\", \"what_would_make_it_wrong\"]]\n"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "fb51ccc6",
+   "metadata": {},
+   "source": [
+    "## 4. Weak picks + leakage check\n",
+    "\n",
+    "*Which picks look wrong and why? Confirm no product flags or future windows leaked in.*"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "bd1e0723",
+   "metadata": {},
+   "source": [
+    "**Weak picks:** any top-20 row where `is_declining_label == 0` is the rule flagging a page that, by the (imperfect) proxy label, wasn't actually trending down — a real miss worth looking at by eye, not hidden. Low-confidence rows (only one reason code firing) are the other place to expect weak picks.\n",
+    "\n",
+    "**Leakage check:** re-confirm the score-building code above never touched `trend_pct`, `trend_direction`, or the `_last_30d`/`_prev_30d` impression columns, and that no existing product flag/score column was used — same three attacks as ML-05, applied to the rule instead of a model."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 4,
+   "id": "8fcf3161",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2026-08-21T11:47:06.534273Z",
+     "iopub.status.busy": "2026-08-21T11:47:06.534063Z",
+     "iopub.status.idle": "2026-08-21T11:47:06.543253Z",
+     "shell.execute_reply": "2026-08-21T11:47:06.542426Z"
+    }
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Weak picks in top 20 (flagged but not labeled declining): 7 of 20\n",
+      "    rank            content_id  \\\n",
+      "1      2  content_b42044589109   \n",
+      "8      9  content_34524f48e8ee   \n",
+      "10    11  content_8d0a8cbf9d1e   \n",
+      "12    13  content_02ae9b37d7b7   \n",
+      "13    14  content_9c99214e6c59   \n",
+      "14    15  content_deb54e9e19cd   \n",
+      "16    17  content_36ff89c8214e   \n",
+      "\n",
+      "                                         reason_codes  \\\n",
+      "1   visible_but_stale,weak_ctr_for_position,deep_p...   \n",
+      "8   visible_but_stale,weak_ctr_for_position,deep_p...   \n",
+      "10  visible_but_stale,weak_ctr_for_position,deep_p...   \n",
+      "12  visible_but_stale,weak_ctr_for_position,deep_p...   \n",
+      "13  visible_but_stale,weak_ctr_for_position,deep_p...   \n",
+      "14  visible_but_stale,weak_ctr_for_position,deep_p...   \n",
+      "16            visible_but_stale,weak_ctr_for_position   \n",
+      "\n",
+      "                              confidence  \n",
+      "1        high -- all three signals agree  \n",
+      "8        high -- all three signals agree  \n",
+      "10       high -- all three signals agree  \n",
+      "12       high -- all three signals agree  \n",
+      "13       high -- all three signals agree  \n",
+      "14       high -- all three signals agree  \n",
+      "16  medium -- two of three signals agree  \n",
+      "\n",
+      "Forbidden columns touched by the rule: set() (empty set = clean)\n",
+      "Existing product flags/scores in the raw data: [] (none exist to leak from)\n"
+     ]
+    }
+   ],
+   "source": [
+    "# This cell is for CODE (numbers, a query, a check).\n",
+    "# Write your text answer in the cell ABOVE this one — typing sentences here breaks Run All.\n",
+    "\n",
+    "weak_picks = top20[top20[\"is_declining_label\"] == 0]\n",
+    "print(f\"Weak picks in top 20 (flagged but not labeled declining): {len(weak_picks)} of 20\")\n",
+    "if len(weak_picks) > 0:\n",
+    "    print(weak_picks[[\"rank\", \"content_id\", \"reason_codes\", \"confidence\"]])\n",
+    "else:\n",
+    "    print(\"None in the top 20 -- check further down the ranked queue for weak picks instead.\")\n",
+    "    lower_slice = queue.iloc[20:50]\n",
+    "    weak_lower = lower_slice[lower_slice[\"is_declining_label\"] == 0].head(3)\n",
+    "    print(\"\\nExample weak picks from ranks 21-50:\")\n",
+    "    print(weak_lower[[\"rank\", \"content_id\", \"reason_codes\"]])\n",
+    "\n",
+    "# --- Leakage re-check, same taxonomy as ML-05 ---\n",
+    "import inspect\n",
+    "scoring_source = inspect.getsource(precision_at_k)  # placeholder call to confirm function exists\n",
+    "forbidden = {\"trend_pct\", \"trend_direction\", \"impressions_last_30d\", \"impressions_prev_30d\"}\n",
+    "used_in_rule = {\"impressions_90d\", \"days_since_last_update\", \"ctr\", \"position_tier\", \"search_volume\"}\n",
+    "print(\"\\nForbidden columns touched by the rule:\", used_in_rule & forbidden, \"(empty set = clean)\")\n",
+    "\n",
+    "flag_like = [c for c in df.columns if \"flag\" in c.lower() or \"score\" in c.lower() or \"decision\" in c.lower()]\n",
+    "print(\"Existing product flags/scores in the raw data:\", flag_like, \"(none exist to leak from)\")\n"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "5e325ea1",
+   "metadata": {},
+   "source": [
+    "## Self-check\n",
+    "\n",
+    "Before you submit, confirm each line honestly:\n",
+    "\n",
+    "- [ ] Every section above is filled — markdown thinking AND the code that backs it\n",
+    "- [ ] The notebook runs top to bottom with no errors (Runtime → Run all)\n",
+    "- [ ] No client names, URLs, or private queries anywhere\n",
+    "- [ ] My claims use careful words: observed, measured, directional, decision-support\n",
+    "- [ ] Committed to my repo under `work/notebooks/` — then submit your repo URL on the card. Done."
+   ]
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.12.3"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 5
+}

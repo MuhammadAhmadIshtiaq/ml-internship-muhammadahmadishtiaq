@@ -1,0 +1,16 @@
+{
+  "model": "logistic_regression",
+  "n_total_rows": 30000,
+  "n_test_rows": 7115,
+  "n_test_clients": 8,
+  "base_rate": 0.5420666666666667,
+  "model_precision_at_10": 1.0,
+  "rule_baseline_precision_at_10": 0.4,
+  "action_distribution": {
+    "Monitor only": 10670,
+    "Improve title/snippet": 10086,
+    "Refresh content": 8119,
+    "Improve relevance & internal links": 1125
+  },
+  "borderline_band_share": 0.1265
+}
